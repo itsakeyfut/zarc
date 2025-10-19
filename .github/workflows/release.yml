@@ -27,7 +27,7 @@ jobs:
       - name: Setup Zig
         run: |
           sudo apt install -y xz-utils
-          sudo sh -c 'wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-linux-x86_64-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
+          sudo sh -c 'wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-x86_64-linux-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
 
       - name: Run tests
         run: zig build test --summary all
@@ -59,10 +59,10 @@ jobs:
       - name: Setup Zig
         run: |
           $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest -Uri 'https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-windows-x86_64-${{ env.ZIG_VERSION }}.zip' -OutFile 'C:\zig.zip'
+          Invoke-WebRequest -Uri 'https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-x86_64-windows-${{ env.ZIG_VERSION }}.zip' -OutFile 'C:\zig.zip'
           cd C:\
           7z x zig.zip
-          Add-Content $env:GITHUB_PATH 'C:\zig-windows-x86_64-${{ env.ZIG_VERSION }}\'
+          Add-Content $env:GITHUB_PATH 'C:\zig-x86_64-windows-${{ env.ZIG_VERSION }}\'
 
       - name: Run tests
         run: zig build test --summary all
@@ -102,7 +102,7 @@ jobs:
       - name: Setup Zig
         run: |
           brew install xz
-          sudo sh -c 'wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-macos-x86_64-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
+          sudo sh -c 'wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-x86_64-macos-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
 
       - name: Run tests
         run: zig build test --summary all
