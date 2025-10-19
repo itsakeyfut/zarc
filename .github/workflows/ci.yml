@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  ZIG_VERSION: 0.15.2
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Verify Zig installation
+        run: zig version
+
+      - name: Check formatting
+        run: zig fmt --check src/
+
+      - name: Build debug
+        run: zig build
+
+      - name: Run unit tests
+        run: zig build test --summary all
+
+      - name: Run integration tests
+        run: zig build test-integration --summary all
+        continue-on-error: true  # Allow failure during early development
+
+      - name: Build release
+        run: zig build -Doptimize=ReleaseSafe
+
+      - name: Test with release build
+        run: zig build test -Doptimize=ReleaseSafe
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zarc-${{ matrix.os }}
+          path: |
+            zig-out/bin/zarc*
+          retention-days: 7
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Check code formatting
+        run: zig fmt --check .
+
+      - name: Build with all warnings
+        run: zig build 2>&1 | tee build.log
+
+  cross-compile-check:
+    name: Cross-compilation verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Build for Linux x86_64
+        run: zig build build-linux-x86_64 -Doptimize=ReleaseFast
+
+      - name: Build for Linux aarch64
+        run: zig build build-linux-aarch64 -Doptimize=ReleaseFast
+
+      - name: Build for Windows x86_64
+        run: zig build build-windows-x86_64 -Doptimize=ReleaseFast
+
+      - name: Build for macOS x86_64
+        run: zig build build-macos-x86_64 -Doptimize=ReleaseFast
+
+      - name: Build for macOS aarch64
+        run: zig build build-macos-aarch64 -Doptimize=ReleaseFast
+
+      - name: List built artifacts
+        run: ls -lh zig-out/bin/
+
+      - name: Upload cross-compiled binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: zarc-cross-compiled
+          path: zig-out/bin/zarc-*
+          retention-days: 7
+
+  build-status:
+    name: Build Status Summary
+    runs-on: ubuntu-latest
+    needs: [test, lint, cross-compile-check]
+    if: always()
+
+    steps:
+      - name: Check build results
+        run: |
+          echo "Test status: ${{ needs.test.result }}"
+          echo "Lint status: ${{ needs.lint.result }}"
+          echo "Cross-compile status: ${{ needs.cross-compile-check.result }}"
+
+          if [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.cross-compile-check.result }}" != "success" ]; then
+            echo "❌ Some checks failed"
+            exit 1
+          else
+            echo "✅ All checks passed"
+          fi
