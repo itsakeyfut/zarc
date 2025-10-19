@@ -1,0 +1,156 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0)'
+        required: true
+        type: string
+
+env:
+  ZIG_VERSION: 0.15.2
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        run: |
+          sudo apt install -y xz-utils
+          sudo sh -c 'wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-x86_64-linux-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
+
+      - name: Run tests
+        run: zig build test --summary all
+
+      - name: Build release
+        run: zig build build-linux-${{ matrix.target }} -Doptimize=ReleaseFast
+
+      - name: Create archive
+        run: |
+          cd zig-out/bin
+          tar czf zarc-linux-${{ matrix.target }}.tar.gz zarc-linux-${{ matrix.target }}
+          sha256sum zarc-linux-${{ matrix.target }}.tar.gz > zarc-linux-${{ matrix.target }}.tar.gz.sha256
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.target }}
+          path: |
+            zig-out/bin/*.tar.gz
+            zig-out/bin/*.sha256
+          retention-days: 30
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri 'https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-x86_64-windows-${{ env.ZIG_VERSION }}.zip' -OutFile 'C:\zig.zip'
+          cd C:\
+          7z x zig.zip
+          Add-Content $env:GITHUB_PATH 'C:\zig-x86_64-windows-${{ env.ZIG_VERSION }}\'
+
+      - name: Run tests
+        run: zig build test --summary all
+
+      - name: Build release
+        run: zig build build-windows-x86_64 -Doptimize=ReleaseFast
+
+      - name: Create archive
+        run: |
+          cd zig-out/bin
+          move zarc-windows-x86_64.exe zarc.exe
+          7z a zarc-windows-x86_64.zip zarc.exe
+          Get-FileHash zarc-windows-x86_64.zip -Algorithm SHA256 | Select-Object -ExpandProperty Hash | Out-File zarc-windows-x86_64.zip.sha256
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x86_64
+          path: |
+            zig-out/bin/*.zip
+            zig-out/bin/*.sha256
+          retention-days: 30
+
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-13
+            target: x86_64
+          - runner: macos-latest
+            target: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        run: |
+          brew install xz
+          sudo sh -c 'wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-x86_64-macos-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
+
+      - name: Run tests
+        run: zig build test --summary all
+
+      - name: Build release
+        run: zig build build-macos-${{ matrix.target }} -Doptimize=ReleaseFast
+
+      - name: Create archive
+        run: |
+          cd zig-out/bin
+          tar czf zarc-macos-${{ matrix.target }}.tar.gz zarc-macos-${{ matrix.target }}
+          sha256sum zarc-macos-${{ matrix.target }}.tar.gz > zarc-macos-${{ matrix.target }}.tar.gz.sha256
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.target }}
+          path: |
+            zig-out/bin/*.tar.gz
+            zig-out/bin/*.sha256
+          retention-days: 30
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Display structure
+        run: ls -R release-artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            release-artifacts/**/*.tar.gz
+            release-artifacts/**/*.zip
+            release-artifacts/**/*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
