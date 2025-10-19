@@ -1,0 +1,91 @@
+name: Test Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  ZIG_VERSION: 0.15.2
+
+jobs:
+  coverage:
+    name: Generate test coverage report
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install kcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kcov
+
+      - name: Run tests with coverage
+        run: |
+          # Run unit tests
+          zig build test --summary all
+
+          # Note: Zig doesn't have native coverage support yet (as of 0.15.2)
+          # This workflow is a placeholder for future coverage tooling
+          # Manual coverage tracking can be done through:
+          # 1. Test file enumeration
+          # 2. Function coverage analysis
+          # 3. Integration with external tools like kcov (for compiled binaries)
+
+      - name: Generate coverage statistics
+        run: |
+          echo "=== Test Coverage Report ==="
+          echo "Current Phase: Phase 0"
+          echo "Target Coverage: 70%+"
+          echo ""
+          echo "Coverage will be measured manually until Zig gains native support:"
+          echo "- Core modules: TBD"
+          echo "- I/O layer: TBD"
+          echo "- Formats: TBD"
+          echo ""
+          echo "To measure coverage manually:"
+          echo "1. List all public functions in each module"
+          echo "2. Identify functions covered by tests"
+          echo "3. Calculate percentage"
+          echo ""
+          echo "See docs/implementation/TESTING_STRATEGY.md for coverage targets"
+
+      - name: Comment coverage summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const message = `## 📊 Test Coverage Report
+
+            Test execution completed successfully.
+
+            **Note:** Zig does not yet have built-in coverage tooling.
+            Manual coverage tracking is documented in \`docs/implementation/TESTING_STRATEGY.md\`.
+
+            **Phase 0 Target:** 70%+ coverage
+
+            ### Coverage Goals by Layer:
+            - Core: 90%+
+            - Compression: 85%+
+            - Formats: 85%+
+            - I/O: 80%+
+            - App: 75%+
+            - CLI: 70%+
+
+            For detailed coverage metrics, please review test files in \`tests/\`.
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            });
