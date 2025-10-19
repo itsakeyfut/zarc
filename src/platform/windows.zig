@@ -27,23 +27,18 @@ pub const platform = common.Platform{
 /// - If mode allows write (0o200 bit), clear read-only attribute
 /// - If mode doesn't allow write, set read-only attribute
 fn setFilePermissions(path: []const u8, mode: u32) !void {
-    const path_w = try std.unicode.utf8ToUtf16LeWithNull(
-        std.heap.page_allocator,
-        path,
-    );
+    const path_w = try std.unicode.utf8ToUtf16LeWithNull(std.heap.page_allocator, path);
     defer std.heap.page_allocator.free(path_w);
 
-    const attrs = try windows.GetFileAttributesW(path_w.ptr);
+    const attrs = try windows.GetFileAttributesWZ(path_w);
 
     // Check if write permission is set (owner write bit)
-    const new_attrs = if ((mode & 0o200) != 0)
-        // Write allowed - clear read-only
-        attrs & ~@as(u32, windows.FILE_ATTRIBUTE_READONLY)
+    const new_attrs: windows.DWORD = if ((mode & 0o200) != 0)
+        attrs & ~windows.FILE_ATTRIBUTE_READONLY
     else
-        // Write not allowed - set read-only
         attrs | windows.FILE_ATTRIBUTE_READONLY;
 
-    try windows.SetFileAttributesW(path_w.ptr, new_attrs);
+    try windows.SetFileAttributesWZ(path_w, new_attrs);
 }
 
 /// Get file permissions (approximated from Windows attributes)
@@ -52,13 +47,10 @@ fn setFilePermissions(path: []const u8, mode: u32) !void {
 /// - 0o444 (read-only) if FILE_ATTRIBUTE_READONLY is set
 /// - 0o666 (read-write) otherwise
 fn getFilePermissions(path: []const u8) !u32 {
-    const path_w = try std.unicode.utf8ToUtf16LeWithNull(
-        std.heap.page_allocator,
-        path,
-    );
+    const path_w = try std.unicode.utf8ToUtf16LeWithNull(std.heap.page_allocator, path);
     defer std.heap.page_allocator.free(path_w);
 
-    const attrs = try windows.GetFileAttributesW(path_w.ptr);
+    const attrs = try windows.GetFileAttributesWZ(path_w);
 
     // Check if read-only attribute is set
     if ((attrs & windows.FILE_ATTRIBUTE_READONLY) != 0) {
@@ -138,34 +130,8 @@ fn readSymlink(allocator: std.mem.Allocator, link_path: []const u8) ![]u8 {
 
 /// Check if path is a symbolic link
 fn isSymlink(path: []const u8) bool {
-    const path_w = std.unicode.utf8ToUtf16LeWithNull(
-        std.heap.page_allocator,
-        path,
-    ) catch return false;
-    defer std.heap.page_allocator.free(path_w);
-
-    const attrs = windows.GetFileAttributesW(path_w.ptr) catch return false;
-
-    // Check if FILE_ATTRIBUTE_REPARSE_POINT is set
-    if ((attrs & windows.FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
-        return false;
-    }
-
-    // Open file to get reparse tag
-    const handle = windows.CreateFileW(
-        path_w.ptr,
-        windows.FILE_READ_ATTRIBUTES,
-        windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE,
-        null,
-        windows.OPEN_EXISTING,
-        windows.FILE_FLAG_BACKUP_SEMANTICS | windows.FILE_FLAG_OPEN_REPARSE_POINT,
-        null,
-    ) catch return false;
-    defer windows.CloseHandle(handle);
-
-    // Check reparse tag to distinguish symlink from other reparse points
-    // This is a simplified check - a full implementation would query the reparse data
-    return true;
+    const st = std.fs.cwd().lstat(path) catch return false;
+    return st.kind == .sym_link;
 }
 
 /// Get platform name

@@ -18,11 +18,10 @@ pub const platform = common.Platform{
 
 /// Set file permissions using POSIX chmod
 fn setFilePermissions(path: []const u8, mode: u32) !void {
-    // Use std.fs to open file and set permissions
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-
-    try file.chmod(mode);
+    // Convert path to null-terminated string for POSIX call
+    var path_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+    const path_z = try std.fmt.bufPrintZ(&path_buf, "{s}", .{path});
+    try std.posix.fchmodat(std.posix.AT.FDCWD, path_z, mode, 0);
 }
 
 /// Get file permissions using POSIX stat
@@ -66,20 +65,18 @@ fn readSymlink(allocator: std.mem.Allocator, link_path: []const u8) ![]u8 {
 
 /// Check if path is a symbolic link using lstat
 fn isSymlink(path: []const u8) bool {
-    // Use fstatat with AT_SYMLINK_NOFOLLOW to check if it's a symlink
-    const path_z = std.fs.cwd().realpathAlloc(
-        std.heap.page_allocator,
-        path,
-    ) catch return false;
-    defer std.heap.page_allocator.free(path_z);
+    // Convert path to null-terminated string for POSIX call
+    var path_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+    const path_z = std.fmt.bufPrintZ(&path_buf, "{s}", .{path}) catch return false;
 
-    const stat_result = std.posix.fstatat(
+    // Use fstatat with AT_SYMLINK_NOFOLLOW to check if it's a symlink
+    const st = std.posix.fstatat(
         std.posix.AT.FDCWD,
-        path,
+        path_z,
         std.posix.AT.SYMLINK_NOFOLLOW,
     ) catch return false;
 
-    return std.posix.S.ISLNK(stat_result.mode);
+    return std.posix.S.ISLNK(st.mode);
 }
 
 /// Get platform name
