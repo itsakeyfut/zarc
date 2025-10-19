@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("../core/types.zig");
 const errors = @import("../core/errors.zig");
+const crc = std.hash.crc;
 
 /// Buffered reader with seeking support for efficient archive reading
 ///
@@ -31,11 +32,8 @@ pub const BufferedReader = struct {
     /// Total bytes read (for statistics)
     total_bytes_read: u64,
 
-    /// CRC32 checksum (if enabled)
-    crc32: ?u32,
-
-    /// Enable CRC32 calculation
-    enable_crc: bool,
+    /// CRC32 state (if enabled)
+    crc32_state: ?crc.Crc32,
 
     /// Initialize a buffered reader with custom buffer size
     ///
@@ -63,10 +61,9 @@ pub const BufferedReader = struct {
             .buffer = buffer,
             .buffer_pos = 0,
             .buffer_end = 0,
-            .file_pos = 0,
+            .file_pos = try file.getPos(),
             .total_bytes_read = 0,
-            .crc32 = null,
-            .enable_crc = false,
+            .crc32_state = null,
         };
     }
 
@@ -85,18 +82,18 @@ pub const BufferedReader = struct {
 
     /// Enable CRC32 checksum calculation
     pub fn enableCrc32(self: *BufferedReader) void {
-        self.enable_crc = true;
-        self.crc32 = 0;
+        self.crc32_state = crc.Crc32.init();
     }
 
     /// Get current CRC32 checksum
     pub fn getCrc32(self: *BufferedReader) ?u32 {
-        return self.crc32;
+        if (self.crc32_state) |st| return st.final();
+        return null;
     }
 
     /// Reset CRC32 checksum
     pub fn resetCrc32(self: *BufferedReader) void {
-        self.crc32 = 0;
+        if (self.crc32_state) |*st| st.* = crc.Crc32.init();
     }
 
     /// Read data into the provided buffer
@@ -138,7 +135,7 @@ pub const BufferedReader = struct {
             self.total_bytes_read += to_copy;
 
             // Update CRC32 if enabled
-            if (self.enable_crc) {
+            if (self.crc32_state != null) {
                 self.updateCrc32(dest[total_read - to_copy .. total_read]);
             }
         }
@@ -187,8 +184,8 @@ pub const BufferedReader = struct {
     ///   - error.SeekError: Failed to seek
     pub fn skip(self: *BufferedReader, count: u64) !void {
         // Try to skip within buffer first
-        const available = self.buffer_end - self.buffer_pos;
-        if (count <= available) {
+        const available_u64: u64 = @as(u64, @intCast(self.buffer_end - self.buffer_pos));
+        if (count <= available_u64) {
             self.buffer_pos += @as(usize, @intCast(count));
             self.total_bytes_read += count;
             return;
@@ -196,10 +193,10 @@ pub const BufferedReader = struct {
 
         // Skip remaining in buffer
         self.buffer_pos = self.buffer_end;
-        self.total_bytes_read += available;
+        self.total_bytes_read += available_u64;
 
         // Seek file position
-        const remaining = count - available;
+        const remaining: u64 = count - available_u64;
         try self.seekBy(@as(i64, @intCast(remaining)));
     }
 
@@ -226,10 +223,11 @@ pub const BufferedReader = struct {
     ///   - error.SeekError: Failed to seek
     pub fn seekBy(self: *BufferedReader, offset: i64) !void {
         const current_pos = try self.getPos();
-        const new_pos = if (offset < 0)
-            current_pos - @as(u64, @intCast(-offset))
-        else
-            current_pos + @as(u64, @intCast(offset));
+        const new_pos = if (offset < 0) blk: {
+            const back: u64 = @as(u64, @intCast(-offset));
+            if (back > current_pos) return error.SeekError;
+            break :blk current_pos - back;
+        } else current_pos + @as(u64, @intCast(offset));
 
         try self.seekTo(new_pos);
     }
@@ -284,9 +282,7 @@ pub const BufferedReader = struct {
 
     /// Update CRC32 checksum
     fn updateCrc32(self: *BufferedReader, data: []const u8) void {
-        if (self.crc32) |*crc| {
-            crc.* = std.hash.Crc32.hash(data);
-        }
+        if (self.crc32_state) |*st| st.update(data);
     }
 };
 

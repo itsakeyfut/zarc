@@ -40,8 +40,8 @@ pub const FileSystem = struct {
         _ = self;
 
         const file = try std.fs.cwd().createFile(path, .{
-            .exclusive = false,
-            .truncate = true,
+            .exclusive = true,
+            .truncate = false,
         });
         errdefer file.close();
 
@@ -205,8 +205,12 @@ pub const FileSystem = struct {
     ) bool {
         _ = self;
 
-        const stat = std.fs.cwd().statFile(path) catch return false;
-        return stat.kind == .sym_link;
+        const stat = std.posix.fstatat(
+            std.posix.AT.FDCWD,
+            path,
+            std.posix.AT.SYMLINK_NOFOLLOW,
+        ) catch return false;
+        return std.posix.S.ISLNK(stat.mode);
     }
 
     /// Check if path exists
@@ -361,7 +365,7 @@ pub fn sanitizePath(
     }
 
     // Check for path traversal
-    var it = std.mem.splitScalar(u8, path, std.fs.path.sep);
+    var it = std.mem.tokenizeAny(u8, path, "/\\");
     var depth: i32 = 0;
 
     while (it.next()) |component| {
@@ -436,7 +440,8 @@ pub fn normalizePath(
     var components = std.array_list.AlignedManaged([]const u8, null).init(allocator);
     defer components.deinit();
 
-    var it = std.mem.splitScalar(u8, path, std.fs.path.sep);
+    const was_abs = std.fs.path.isAbsolute(path);
+    var it = std.mem.tokenizeAny(u8, path, "/\\");
     while (it.next()) |component| {
         if (std.mem.eql(u8, component, ".") or component.len == 0) {
             continue;
@@ -449,7 +454,15 @@ pub fn normalizePath(
         }
     }
 
-    return try std.fs.path.join(allocator, components.items);
+    const joined = try std.fs.path.join(allocator, components.items);
+    errdefer allocator.free(joined);
+    if (was_abs) {
+        const prefix = if (builtin.os.tag == .windows) "" else "/";
+        const result = try std.mem.concat(allocator, u8, &[_][]const u8{ prefix, joined });
+        allocator.free(joined);
+        return result;
+    }
+    return joined;
 }
 
 // Tests

@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("../core/types.zig");
 const errors = @import("../core/errors.zig");
+const crc = std.hash.crc;
 
 /// Buffered writer for efficient file output
 ///
@@ -25,11 +26,8 @@ pub const BufferedWriter = struct {
     /// Total bytes written (for statistics)
     total_bytes_written: u64,
 
-    /// CRC32 checksum (if enabled)
-    crc32: ?u32,
-
-    /// Enable CRC32 calculation
-    enable_crc: bool,
+    /// CRC32 state (if enabled)
+    crc32_state: ?crc.Crc32,
 
     /// Initialize a buffered writer with custom buffer size
     ///
@@ -57,8 +55,7 @@ pub const BufferedWriter = struct {
             .buffer = buffer,
             .buffer_pos = 0,
             .total_bytes_written = 0,
-            .crc32 = null,
-            .enable_crc = false,
+            .crc32_state = null,
         };
     }
 
@@ -78,18 +75,18 @@ pub const BufferedWriter = struct {
 
     /// Enable CRC32 checksum calculation
     pub fn enableCrc32(self: *BufferedWriter) void {
-        self.enable_crc = true;
-        self.crc32 = 0;
+        self.crc32_state = crc.Crc32.init();
     }
 
     /// Get current CRC32 checksum
     pub fn getCrc32(self: *BufferedWriter) ?u32 {
-        return self.crc32;
+        if (self.crc32_state) |st| return st.final();
+        return null;
     }
 
     /// Reset CRC32 checksum
     pub fn resetCrc32(self: *BufferedWriter) void {
-        self.crc32 = 0;
+        if (self.crc32_state) |*st| st.* = crc.Crc32.init();
     }
 
     /// Write data from the provided buffer
@@ -107,11 +104,6 @@ pub const BufferedWriter = struct {
 
         var total_written: usize = 0;
 
-        // Update CRC32 if enabled
-        if (self.enable_crc) {
-            self.updateCrc32(data);
-        }
-
         while (total_written < data.len) {
             const available = self.buffer.len - self.buffer_pos;
             const to_copy = @min(available, data.len - total_written);
@@ -125,6 +117,11 @@ pub const BufferedWriter = struct {
             self.buffer_pos += to_copy;
             total_written += to_copy;
             self.total_bytes_written += to_copy;
+
+            // Update CRC32 for the portion we actually accepted
+            if (self.crc32_state != null) {
+                self.updateCrc32(data[total_written - to_copy .. total_written]);
+            }
 
             // Flush if buffer is full
             if (self.buffer_pos >= self.buffer.len) {
@@ -262,9 +259,7 @@ pub const BufferedWriter = struct {
 
     /// Update CRC32 checksum
     fn updateCrc32(self: *BufferedWriter, data: []const u8) void {
-        if (self.crc32) |*crc| {
-            crc.* = std.hash.Crc32.hash(data);
-        }
+        if (self.crc32_state) |*st| st.update(data);
     }
 };
 
