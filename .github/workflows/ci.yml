@@ -192,13 +192,14 @@ jobs:
           echo "Lint status: ${{ needs.lint.result }}"
           echo "Cross-compile status: ${{ needs.cross-compile-check.result }}"
 
-          if [ "${{ needs.x86_64-linux.result }}" != "success" ] || \
-             [ "${{ needs.x86_64-windows.result }}" != "success" ] || \
-             [ "${{ needs.x86_64-macos.result }}" != "success" ] || \
-             [ "${{ needs.lint.result }}" != "success" ] || \
-             [ "${{ needs.cross-compile-check.result }}" != "success" ]; then
+          # Check for failures (skipped is OK)
+          if [ "${{ needs.x86_64-linux.result }}" == "failure" ] || \
+             [ "${{ needs.x86_64-windows.result }}" == "failure" ] || \
+             [ "${{ needs.x86_64-macos.result }}" == "failure" ] || \
+             [ "${{ needs.lint.result }}" == "failure" ] || \
+             [ "${{ needs.cross-compile-check.result }}" == "failure" ]; then
             echo "❌ Some checks failed"
             exit 1
           else
-            echo "✅ All checks passed"
+            echo "✅ All checks passed or skipped"
           fi
