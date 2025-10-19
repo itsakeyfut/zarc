@@ -474,7 +474,8 @@ test "createAdaptiveReader: buffer size selection" {
     // Small file (< 100KB)
     var small_file = try tmp_dir.dir.createFile("small.txt", .{ .read = true });
     defer small_file.close();
-    try small_file.writeAll("x" ** 50);
+    const buf = [_]u8{'x'} ** 50;
+    try small_file.writeAll(&buf);
     try small_file.seekTo(0);
 
     var small_reader = try createAdaptiveReader(allocator, small_file);
