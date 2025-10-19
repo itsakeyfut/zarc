@@ -10,7 +10,6 @@ const windows = std.os.windows;
 /// - POSIX permissions are approximated to Windows file attributes
 /// - Read-only attribute is used to approximate write permissions
 /// - Symbolic links may require administrator privileges on older Windows versions
-
 /// Platform implementation for Windows
 pub const platform = common.Platform{
     .setFilePermissions = setFilePermissions,

@@ -11,7 +11,6 @@ const common = @import("common.zig");
 /// - Extended attributes (FreeBSD)
 /// - Symbolic links and hard links
 /// - Case-sensitive filesystems
-
 /// Platform implementation for BSD
 pub const platform = common.Platform{
     .setFilePermissions = setFilePermissions,

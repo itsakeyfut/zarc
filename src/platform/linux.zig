@@ -5,7 +5,6 @@ const common = @import("common.zig");
 ///
 /// This module implements platform-specific operations for Linux
 /// using POSIX system calls.
-
 /// Platform implementation for Linux
 pub const platform = common.Platform{
     .setFilePermissions = setFilePermissions,

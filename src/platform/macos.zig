@@ -11,7 +11,6 @@ const common = @import("common.zig");
 /// - Extended attributes (xattr)
 /// - Symbolic links and hard links
 /// - Case-insensitive (default) or case-sensitive filesystems
-
 /// Platform implementation for macOS
 pub const platform = common.Platform{
     .setFilePermissions = setFilePermissions,

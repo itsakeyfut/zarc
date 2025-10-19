@@ -2,10 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const platform_common = @import("../../src/platform/common.zig");
 
-/// Platform abstraction integration tests
-///
-/// These tests verify that the platform abstraction layer
-/// correctly implements the common interface across different platforms.
+// Platform abstraction integration tests
+//
+// These tests verify that the platform abstraction layer
+// correctly implements the common interface across different platforms.
 
 test "Platform: getPlatform returns valid implementation" {
     const platform = platform_common.getPlatform();
