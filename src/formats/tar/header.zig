@@ -114,9 +114,7 @@ pub const TarHeader = struct {
     ///   - Parsed TarHeader struct
     ///
     /// Errors:
-    ///   - error.InvalidHeader: Data size is not 512 bytes
-    ///   - error.CorruptedHeader: Header magic is not "ustar"
-    ///   - error.InvalidChecksum: Checksum verification failed
+    ///   - error.CorruptedHeader: Header magic is not "ustar", checksum parsing failed, or checksum verification failed
     ///
     /// Example:
     /// ```zig
@@ -128,17 +126,20 @@ pub const TarHeader = struct {
         var header: TarHeader = undefined;
         @memcpy(@as([*]u8, @ptrCast(&header))[0..BLOCK_SIZE], data);
 
-        // Verify USTAR magic
-        if (!std.mem.eql(u8, header.magic[0..5], "ustar")) {
+        // Verify USTAR magic and version
+        if (!std.mem.eql(u8, header.magic[0..6], "ustar\x00") or
+            !std.mem.eql(u8, header.version[0..2], "00"))
+        {
             return error.CorruptedHeader;
         }
 
         // Verify checksum
-        const stored_checksum = util.parseOctal(&header.checksum) catch {
+        const stored_checksum_u64 = util.parseOctal(&header.checksum) catch {
             return error.CorruptedHeader;
         };
 
         const calculated_checksum = calculateChecksum(data);
+        const stored_checksum: u32 = @intCast(stored_checksum_u64);
         if (stored_checksum != calculated_checksum) {
             return error.CorruptedHeader;
         }
@@ -374,8 +375,7 @@ pub fn calculateChecksum(data: *const [TarHeader.BLOCK_SIZE]u8) u32 {
 ///   - Initialized TarHeader struct
 ///
 /// Errors:
-///   - error.FilenameTooLong: File name exceeds tar limits
-///   - error.InvalidArgument: Invalid entry data
+///   - error.FilenameTooLong: File name exceeds tar limits (>255 chars total, >155 prefix, or >100 link target)
 ///
 /// Example:
 /// ```zig
@@ -570,8 +570,9 @@ test "TarHeader.parse: invalid magic" {
 test "TarHeader.parse: invalid checksum" {
     var header_data: [512]u8 = std.mem.zeroes([512]u8);
 
-    // Set valid magic
+    // Set valid magic and version
     @memcpy(header_data[257..263], "ustar\x00");
+    @memcpy(header_data[263..265], "00");
 
     // Set wrong checksum
     @memcpy(header_data[148..156], "9999999\x00");
@@ -611,8 +612,9 @@ test "createHeader: simple file" {
 
     try std.testing.expectEqual(TarHeader.TypeFlag.REGULAR, header.typeflag);
 
-    // Verify USTAR magic
-    try std.testing.expect(std.mem.eql(u8, header.magic[0..5], "ustar"));
+    // Verify USTAR magic and version
+    try std.testing.expect(std.mem.eql(u8, header.magic[0..6], "ustar\x00"));
+    try std.testing.expect(std.mem.eql(u8, header.version[0..2], "00"));
 }
 
 test "createHeader: with prefix" {
