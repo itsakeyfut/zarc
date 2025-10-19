@@ -11,22 +11,17 @@ env:
   ZIG_VERSION: 0.15.2
 
 jobs:
-  test:
-    name: Test on ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-
+  x86_64-linux:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Zig
-        uses: mlugg/setup-zig@v1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+        run: |
+          sudo apt install -y xz-utils
+          sudo sh -c 'wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-linux-x86_64-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
 
       - name: Verify Zig installation
         run: zig version
@@ -42,7 +37,7 @@ jobs:
 
       - name: Run integration tests
         run: zig build test-integration --summary all
-        continue-on-error: true  # Allow failure during early development
+        continue-on-error: true
 
       - name: Build release
         run: zig build -Doptimize=ReleaseSafe
@@ -50,26 +45,99 @@ jobs:
       - name: Test with release build
         run: zig build test -Doptimize=ReleaseSafe
 
+      - name: Cross-compile to Windows
+        run: zig build build-windows-x86_64 -Doptimize=ReleaseFast
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: zarc-${{ matrix.os }}
-          path: |
-            zig-out/bin/zarc*
+          name: zarc-linux
+          path: zig-out/bin/zarc*
           retention-days: 7
 
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-
+  x86_64-windows:
+    runs-on: windows-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Zig
-        uses: mlugg/setup-zig@v1
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri 'https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-windows-x86_64-${{ env.ZIG_VERSION }}.zip' -OutFile 'C:\zig.zip'
+          cd C:\
+          7z x zig.zip
+          Add-Content $env:GITHUB_PATH 'C:\zig-windows-x86_64-${{ env.ZIG_VERSION }}\'
+
+      - name: Verify Zig installation
+        run: zig version
+
+      - name: Build debug
+        run: zig build
+
+      - name: Run unit tests
+        run: zig build test --summary all
+
+      - name: Run integration tests
+        run: zig build test-integration --summary all
+        continue-on-error: true
+
+      - name: Build release
+        run: zig build -Doptimize=ReleaseSafe
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          version: ${{ env.ZIG_VERSION }}
+          name: zarc-windows
+          path: zig-out/bin/zarc*
+          retention-days: 7
+
+  x86_64-macos:
+    runs-on: macos-13
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        run: |
+          brew install xz
+          sudo sh -c 'wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-macos-x86_64-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
+
+      - name: Verify Zig installation
+        run: zig version
+
+      - name: Build debug
+        run: zig build
+
+      - name: Run unit tests
+        run: zig build test --summary all
+
+      - name: Run integration tests
+        run: zig build test-integration --summary all
+        continue-on-error: true
+
+      - name: Build release
+        run: zig build -Doptimize=ReleaseSafe
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zarc-macos
+          path: zig-out/bin/zarc*
+          retention-days: 7
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        run: |
+          sudo apt install -y xz-utils
+          sudo sh -c 'wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-linux-x86_64-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
 
       - name: Check code formatting
         run: zig fmt --check .
@@ -78,17 +146,15 @@ jobs:
         run: zig build 2>&1 | tee build.log
 
   cross-compile-check:
-    name: Cross-compilation verification
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Zig
-        uses: mlugg/setup-zig@v1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+        run: |
+          sudo apt install -y xz-utils
+          sudo sh -c 'wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-linux-x86_64-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
 
       - name: Build for Linux x86_64
         run: zig build build-linux-x86_64 -Doptimize=ReleaseFast
@@ -118,17 +184,20 @@ jobs:
   build-status:
     name: Build Status Summary
     runs-on: ubuntu-latest
-    needs: [test, lint, cross-compile-check]
+    needs: [x86_64-linux, x86_64-windows, x86_64-macos, lint, cross-compile-check]
     if: always()
-
     steps:
       - name: Check build results
         run: |
-          echo "Test status: ${{ needs.test.result }}"
+          echo "Linux status: ${{ needs.x86_64-linux.result }}"
+          echo "Windows status: ${{ needs.x86_64-windows.result }}"
+          echo "macOS status: ${{ needs.x86_64-macos.result }}"
           echo "Lint status: ${{ needs.lint.result }}"
           echo "Cross-compile status: ${{ needs.cross-compile-check.result }}"
 
-          if [ "${{ needs.test.result }}" != "success" ] || \
+          if [ "${{ needs.x86_64-linux.result }}" != "success" ] || \
+             [ "${{ needs.x86_64-windows.result }}" != "success" ] || \
+             [ "${{ needs.x86_64-macos.result }}" != "success" ] || \
              [ "${{ needs.lint.result }}" != "success" ] || \
              [ "${{ needs.cross-compile-check.result }}" != "success" ]; then
             echo "❌ Some checks failed"
