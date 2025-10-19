@@ -169,7 +169,7 @@ pub const TarHeader = struct {
         const name_str = self.name[0..name_len];
 
         // Check if prefix is used
-        const prefix_len = std.mem.indexOfScalar(u8, &self.prefix, 0) orelse 0;
+        const prefix_len = std.mem.indexOfScalar(u8, &self.prefix, 0) orelse self.prefix.len;
         if (prefix_len > 0) {
             const prefix_str = self.prefix[0..prefix_len];
             return try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix_str, name_str });
