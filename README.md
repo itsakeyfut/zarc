@@ -16,7 +16,7 @@ A modern, high-performance tool written in Zig.
 
 ### Prerequisites
 
-- Zig 0.13.0 or later
+- Zig 0.15.2 or later
 
 ### Building from Source
 

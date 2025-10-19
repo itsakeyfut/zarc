@@ -1,5 +1,30 @@
 const std = @import("std");
 
+// Core modules
+pub const core = struct {
+    pub const errors = @import("core/errors.zig");
+    pub const types = @import("core/types.zig");
+    pub const util = @import("core/util.zig");
+};
+
+// I/O modules
+pub const io = struct {
+    pub const reader = @import("io/reader.zig");
+    pub const writer = @import("io/writer.zig");
+    pub const filesystem = @import("io/filesystem.zig");
+};
+
 pub fn main() !void {
     std.debug.print("Hello, world!\n", .{});
+}
+
+// Test references to include all module tests
+test {
+    std.testing.refAllDecls(@This());
+    _ = core.errors;
+    _ = core.types;
+    _ = core.util;
+    _ = io.reader;
+    _ = io.writer;
+    _ = io.filesystem;
 }
