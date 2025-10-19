@@ -14,6 +14,15 @@ pub const io = struct {
     pub const filesystem = @import("io/filesystem.zig");
 };
 
+// Platform abstraction
+pub const platform = struct {
+    pub const common = @import("platform/common.zig");
+    pub const linux = @import("platform/linux.zig");
+    pub const windows = @import("platform/windows.zig");
+    pub const macos = @import("platform/macos.zig");
+    pub const bsd = @import("platform/bsd.zig");
+};
+
 pub fn main() !void {
     std.debug.print("Hello, world!\n", .{});
 }
@@ -27,4 +36,9 @@ test {
     _ = io.reader;
     _ = io.writer;
     _ = io.filesystem;
+    _ = platform.common;
+    _ = platform.linux;
+    _ = platform.windows;
+    _ = platform.macos;
+    _ = platform.bsd;
 }
