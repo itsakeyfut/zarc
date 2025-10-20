@@ -421,21 +421,32 @@ pub fn createHeader(entry: *const types.Entry, allocator: std.mem.Allocator) !Ta
 
     // Set file mode
     const mode_str = try std.fmt.bufPrint(&header.mode, "{o:0>7}", .{entry.mode});
-    header.mode[mode_str.len] = 0; // Null terminate
+    if (mode_str.len < header.mode.len) {
+        header.mode[mode_str.len] = 0; // Null terminate
+    }
 
     // Set UID and GID
     const uid_str = try std.fmt.bufPrint(&header.uid, "{o:0>7}", .{entry.uid});
-    header.uid[uid_str.len] = 0;
+    if (uid_str.len < header.uid.len) {
+        header.uid[uid_str.len] = 0;
+    }
     const gid_str = try std.fmt.bufPrint(&header.gid, "{o:0>7}", .{entry.gid});
-    header.gid[gid_str.len] = 0;
+    if (gid_str.len < header.gid.len) {
+        header.gid[gid_str.len] = 0;
+    }
 
     // Set file size
     const size_str = try std.fmt.bufPrint(&header.size, "{o:0>11}", .{entry.size});
-    header.size[size_str.len] = 0;
+    if (size_str.len < header.size.len) {
+        header.size[size_str.len] = 0;
+    }
 
-    // Set modification time
-    const mtime_str = try std.fmt.bufPrint(&header.mtime, "{o:0>11}", .{entry.mtime});
-    header.mtime[mtime_str.len] = 0;
+    // Set modification time (cast to u64 to avoid sign prefix in octal format)
+    const mtime_str = try std.fmt.bufPrint(&header.mtime, "{o:0>11}", .{@as(u64, @intCast(entry.mtime))});
+    if (mtime_str.len < header.mtime.len) {
+        header.mtime[mtime_str.len] = 0;
+    }
+
 
     // Set type flag
     header.typeflag = switch (entry.entry_type) {
