@@ -7,6 +7,14 @@ pub const core = struct {
     pub const util = @import("core/util.zig");
 };
 
+// Format modules
+pub const formats = struct {
+    pub const tar = struct {
+        pub const header = @import("formats/tar/header.zig");
+        pub const reader = @import("formats/tar/reader.zig");
+    };
+};
+
 // I/O modules
 pub const io = struct {
     pub const reader = @import("io/reader.zig");
@@ -33,6 +41,8 @@ test {
     _ = core.errors;
     _ = core.types;
     _ = core.util;
+    _ = formats.tar.header;
+    _ = formats.tar.reader;
     _ = io.reader;
     _ = io.writer;
     _ = io.filesystem;

@@ -41,15 +41,25 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_unit_tests.step);
 
     // Integration tests (when tests/integration directory exists)
+    const src_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/integration/main.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zarc", .module = src_module },
+            },
         }),
     });
 
     const run_integration_tests = b.addRunArtifact(integration_tests);
+    run_integration_tests.setCwd(b.path(".")); // Set working directory to project root
     const integration_step = b.step("test-integration", "Run integration tests");
     integration_step.dependOn(&run_integration_tests.step);
 
