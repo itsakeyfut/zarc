@@ -225,15 +225,16 @@ pub const TarReader = struct {
         }
 
         // Read up to remaining bytes
-        const to_read = @min(buffer.len, self.remaining_bytes);
+        const to_read_u64 = @min(@as(u64, buffer.len), self.remaining_bytes);
+        const to_read: usize = @intCast(to_read_u64);
         const n = try self.file.readAll(buffer[0..to_read]);
 
         if (n != to_read) {
             return error.IncompleteArchive;
         }
 
-        self.remaining_bytes -= n;
-        self.file_position += n;
+        self.remaining_bytes -= @as(u64, n);
+        self.file_position += @as(u64, n);
 
         return n;
     }
