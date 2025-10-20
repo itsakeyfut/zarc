@@ -137,6 +137,10 @@ pub const TarReader = struct {
                 var second_block: [header.TarHeader.BLOCK_SIZE]u8 = undefined;
                 const n2 = try self.file.readAll(&second_block);
 
+                if (n2 == 0) {
+                    // Some TAR writers only emit one zero block at EOF
+                    return null;
+                }
                 if (n2 == header.TarHeader.BLOCK_SIZE and isZeroBlock(&second_block)) {
                     self.file_position += header.TarHeader.BLOCK_SIZE;
                     return null; // End of archive
