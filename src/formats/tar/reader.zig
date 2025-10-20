@@ -255,24 +255,29 @@ pub const TarReader = struct {
             return;
         }
 
-        // Try to seek (faster than reading)
-        self.file.seekBy(@intCast(self.remaining_bytes)) catch {
-            // If seek fails, read and discard
-            var discard_buffer: [4096]u8 = undefined;
-            var remaining = self.remaining_bytes;
+        // Try to seek (faster than reading) if the offset fits in i64
+        if (std.math.cast(i64, self.remaining_bytes)) |off| {
+            if (self.file.seekBy(off)) |_| {
+                self.file_position += self.remaining_bytes;
+                self.remaining_bytes = 0;
+                return;
+            } else |_| {}
+        }
+        // Fallback: read and discard
+        var discard_buffer: [4096]u8 = undefined;
+        var remaining = self.remaining_bytes;
 
-            while (remaining > 0) {
-                const to_read = @min(discard_buffer.len, remaining);
-                const n = try self.file.readAll(discard_buffer[0..to_read]);
+        while (remaining > 0) {
+            const to_read_u64 = @min(remaining, @as(u64, discard_buffer.len));
+            const to_read: usize = @intCast(to_read_u64);
+            const n = try self.file.readAll(discard_buffer[0..to_read]);
 
-                if (n != to_read) {
-                    return error.IncompleteArchive;
-                }
-
-                remaining -= n;
+            if (n != to_read) {
+                return error.IncompleteArchive;
             }
-        };
 
+            remaining -= @as(u64, n);
+        }
         self.file_position += self.remaining_bytes;
         self.remaining_bytes = 0;
     }
