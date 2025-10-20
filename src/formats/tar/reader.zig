@@ -2,6 +2,7 @@ const std = @import("std");
 const header = @import("header.zig");
 const types = @import("../../core/types.zig");
 const errors = @import("../../core/errors.zig");
+const archive = @import("../archive.zig");
 
 /// TAR archive reader with streaming support
 ///
@@ -91,6 +92,54 @@ pub const TarReader = struct {
             self.allocator.free(link);
             self.gnu_long_link = null;
         }
+    }
+
+    /// Create an ArchiveReader interface from this TarReader
+    ///
+    /// Allows TarReader to be used through the common ArchiveReader interface,
+    /// enabling polymorphism across different archive formats.
+    ///
+    /// Returns:
+    ///   - ArchiveReader wrapping this TarReader
+    ///
+    /// Example:
+    /// ```zig
+    /// var tar_reader = try TarReader.init(allocator, file);
+    /// defer tar_reader.deinit();
+    ///
+    /// var archive_reader = tar_reader.archiveReader();
+    ///
+    /// while (try archive_reader.next()) |entry| {
+    ///     std.debug.print("Entry: {s}\n", .{entry.path});
+    /// }
+    /// ```
+    pub fn archiveReader(self: *TarReader) archive.ArchiveReader {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .next = nextVTable,
+                .read = readVTable,
+                .deinit = deinitVTable,
+            },
+        };
+    }
+
+    /// VTable implementation for next()
+    fn nextVTable(ptr: *anyopaque) anyerror!?types.Entry {
+        const self: *TarReader = @ptrCast(@alignCast(ptr));
+        return self.next();
+    }
+
+    /// VTable implementation for read()
+    fn readVTable(ptr: *anyopaque, buffer: []u8) anyerror!usize {
+        const self: *TarReader = @ptrCast(@alignCast(ptr));
+        return self.read(buffer);
+    }
+
+    /// VTable implementation for deinit()
+    fn deinitVTable(ptr: *anyopaque) void {
+        const self: *TarReader = @ptrCast(@alignCast(ptr));
+        self.deinit();
     }
 
     /// Get next entry in archive
@@ -506,4 +555,61 @@ test "TarReader: empty archive (end marker only)" {
 
     const entry = try reader.next();
     try std.testing.expectEqual(@as(?types.Entry, null), entry);
+}
+
+test "TarReader: ArchiveReader trait implementation" {
+    const allocator = std.testing.allocator;
+
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const file = try tmp_dir.dir.createFile("trait_test.tar", .{ .read = true });
+    defer file.close();
+
+    // Write two zero blocks (end-of-archive marker)
+    var zero_block: [512]u8 = undefined;
+    @memset(&zero_block, 0);
+    try file.writeAll(&zero_block);
+    try file.writeAll(&zero_block);
+    try file.seekTo(0);
+
+    // Create TarReader and get ArchiveReader interface
+    var tar_reader = try TarReader.init(allocator, file);
+    defer tar_reader.deinit();
+
+    var archive_reader = tar_reader.archiveReader();
+
+    // Test next() through the trait (empty archive returns null)
+    const entry = try archive_reader.next();
+    try std.testing.expectEqual(@as(?types.Entry, null), entry);
+
+    // Note: We can't test read() when there's no current entry
+    // That's tested in the full TarReader tests with actual entries
+}
+
+test "TarReader: ArchiveReader polymorphism" {
+    const allocator = std.testing.allocator;
+
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const file = try tmp_dir.dir.createFile("poly_test.tar", .{ .read = true });
+    defer file.close();
+
+    // Write end-of-archive marker
+    var zero_block: [512]u8 = undefined;
+    @memset(&zero_block, 0);
+    try file.writeAll(&zero_block);
+    try file.writeAll(&zero_block);
+    try file.seekTo(0);
+
+    var tar_reader = try TarReader.init(allocator, file);
+    defer tar_reader.deinit();
+
+    // This demonstrates that we can pass ArchiveReader to generic functions
+    var archive_reader = tar_reader.archiveReader();
+    const entries = try archive.readAllEntries(allocator, &archive_reader);
+    defer allocator.free(entries);
+
+    try std.testing.expectEqual(@as(usize, 0), entries.len);
 }
