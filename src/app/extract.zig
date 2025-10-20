@@ -81,12 +81,49 @@ pub const ExtractResult = struct {
         err: anyerror,
     ) !void {
         // Format human-readable message
-        // Try to cast to ZarcError for detailed formatting, otherwise use simple message
-        const message = blk: {
-            const zarc_err: errors.ZarcError = @errorCast(err);
-            break :blk errors.formatError(allocator, zarc_err, .{
+        // Try to format as ZarcError if possible, otherwise use generic format
+        const message = switch (err) {
+            // Core errors
+            error.OutOfMemory,
+            error.InvalidArgument,
+            error.Overflow,
+            error.BufferTooSmall,
+            // I/O errors
+            error.FileNotFound,
+            error.PermissionDenied,
+            error.DiskFull,
+            error.ReadError,
+            error.WriteError,
+            error.SeekError,
+            // Compression errors
+            error.InvalidData,
+            error.UnsupportedMethod,
+            error.CorruptedStream,
+            error.DecompressionFailed,
+            error.CompressionFailed,
+            // Format errors
+            error.InvalidFormat,
+            error.UnsupportedVersion,
+            error.CorruptedHeader,
+            error.IncompleteArchive,
+            // Application errors
+            error.PathTraversalAttempt,
+            error.AbsolutePathNotAllowed,
+            error.SymlinkEscapeAttempt,
+            error.FileSizeExceedsLimit,
+            error.SuspiciousCompressionRatio,
+            error.TotalSizeExceedsLimit,
+            error.EmptyPath,
+            error.NullByteInPath,
+            error.PathTooLong,
+            error.InvalidCharacterInPath,
+            error.SymlinkNotAllowed,
+            error.AbsoluteSymlinkNotAllowed,
+            error.NullByteInFilename,
+            => |zarc_err| errors.formatError(allocator, zarc_err, .{
                 .path = entry_path,
-            }) catch try std.fmt.allocPrint(allocator, "Error: {s}\nFile: {s}", .{ @errorName(err), entry_path });
+            }) catch try std.fmt.allocPrint(allocator, "Error: {s}\nFile: {s}", .{ @errorName(err), entry_path }),
+            else => try std.fmt.allocPrint(allocator, "Error: {s}\nFile: {s}", .{ @errorName(err), entry_path }),
         };
         errdefer allocator.free(message);
 
