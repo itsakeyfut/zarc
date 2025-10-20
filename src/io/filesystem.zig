@@ -47,7 +47,7 @@ pub const FileSystem = struct {
 
         // Set permissions (POSIX only)
         if (builtin.os.tag != .windows) {
-            try file.chmod(mode);
+            try file.chmod(@as(u16, @intCast(mode & 0o7777)));
         }
 
         return file;
@@ -75,7 +75,7 @@ pub const FileSystem = struct {
         if (builtin.os.tag != .windows) {
             const file = try std.fs.cwd().openFile(path, .{});
             defer file.close();
-            try file.chmod(mode);
+            try file.chmod(@as(u16, @intCast(mode & 0o7777)));
         }
     }
 
@@ -143,7 +143,7 @@ pub const FileSystem = struct {
 
         const file = try std.fs.cwd().openFile(path, .{});
         defer file.close();
-        try file.chmod(mode);
+        try file.chmod(@as(u16, @intCast(mode & 0o7777)));
     }
 
     /// Create a symbolic link
