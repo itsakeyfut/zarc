@@ -126,10 +126,13 @@ pub const TarHeader = struct {
         var header: TarHeader = undefined;
         @memcpy(@as([*]u8, @ptrCast(&header))[0..BLOCK_SIZE], data);
 
-        // Verify USTAR magic and version
-        if (!std.mem.eql(u8, header.magic[0..6], "ustar\x00") or
-            !std.mem.eql(u8, header.version[0..2], "00"))
-        {
+        // Verify USTAR magic
+        // Accept both POSIX ustar ("ustar\x00") and GNU tar ("ustar  ")
+        const is_posix_ustar = std.mem.eql(u8, header.magic[0..6], "ustar\x00") and
+            std.mem.eql(u8, header.version[0..2], "00");
+        const is_gnu_tar = std.mem.startsWith(u8, header.magic[0..6], "ustar");
+
+        if (!is_posix_ustar and !is_gnu_tar) {
             return error.CorruptedHeader;
         }
 
@@ -417,17 +420,22 @@ pub fn createHeader(entry: *const types.Entry, allocator: std.mem.Allocator) !Ta
     }
 
     // Set file mode
-    _ = try std.fmt.bufPrint(&header.mode, "{o:0>7}\x00", .{entry.mode});
+    const mode_str = try std.fmt.bufPrint(&header.mode, "{o:0>7}", .{entry.mode});
+    header.mode[mode_str.len] = 0; // Null terminate
 
     // Set UID and GID
-    _ = try std.fmt.bufPrint(&header.uid, "{o:0>7}\x00", .{entry.uid});
-    _ = try std.fmt.bufPrint(&header.gid, "{o:0>7}\x00", .{entry.gid});
+    const uid_str = try std.fmt.bufPrint(&header.uid, "{o:0>7}", .{entry.uid});
+    header.uid[uid_str.len] = 0;
+    const gid_str = try std.fmt.bufPrint(&header.gid, "{o:0>7}", .{entry.gid});
+    header.gid[gid_str.len] = 0;
 
     // Set file size
-    _ = try std.fmt.bufPrint(&header.size, "{o:0>11}\x00", .{entry.size});
+    const size_str = try std.fmt.bufPrint(&header.size, "{o:0>11}", .{entry.size});
+    header.size[size_str.len] = 0;
 
     // Set modification time
-    _ = try std.fmt.bufPrint(&header.mtime, "{o:0>11}\x00", .{entry.mtime});
+    const mtime_str = try std.fmt.bufPrint(&header.mtime, "{o:0>11}", .{entry.mtime});
+    header.mtime[mtime_str.len] = 0;
 
     // Set type flag
     header.typeflag = switch (entry.entry_type) {
@@ -463,8 +471,11 @@ pub fn createHeader(entry: *const types.Entry, allocator: std.mem.Allocator) !Ta
     }
 
     // Calculate and set checksum
+    // Format: 6 octal digits + null + space (traditional format)
     const checksum = calculateChecksum(@ptrCast(&header));
-    _ = try std.fmt.bufPrint(&header.checksum, "{o:0>6}\x00 ", .{checksum});
+    _ = try std.fmt.bufPrint(header.checksum[0..6], "{o:0>6}", .{checksum});
+    header.checksum[6] = 0;
+    header.checksum[7] = ' ';
 
     return header;
 }
