@@ -7,3 +7,8 @@ test "basic integration test placeholder" {
     // Placeholder test to ensure the test framework works
     try std.testing.expect(true);
 }
+
+// Import tar reader integration tests
+test {
+    _ = @import("tar_reader_test.zig");
+}
