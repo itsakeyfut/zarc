@@ -66,6 +66,22 @@ pub const AppError = error{
     FileSizeExceedsLimit,
     /// Suspicious compression ratio (possible Zip Bomb)
     SuspiciousCompressionRatio,
+    /// Total extracted size exceeds limit
+    TotalSizeExceedsLimit,
+    /// Empty path provided
+    EmptyPath,
+    /// Path contains NULL byte
+    NullByteInPath,
+    /// Path exceeds maximum length
+    PathTooLong,
+    /// Path contains invalid character
+    InvalidCharacterInPath,
+    /// Symlinks are not allowed by policy
+    SymlinkNotAllowed,
+    /// Absolute symlinks are not allowed
+    AbsoluteSymlinkNotAllowed,
+    /// Filename contains NULL byte
+    NullByteInFilename,
 };
 
 /// Unified error type for all zarc errors
