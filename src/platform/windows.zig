@@ -27,7 +27,7 @@ pub const platform = common.Platform{
 /// - If mode allows write (0o200 bit), clear read-only attribute
 /// - If mode doesn't allow write, set read-only attribute
 fn setFilePermissions(path: []const u8, mode: u32) !void {
-    const path_w = try std.unicode.utf8ToUtf16LeWithNull(std.heap.page_allocator, path);
+    const path_w = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, path);
     defer std.heap.page_allocator.free(path_w);
 
     const attrs = try windows.GetFileAttributesWZ(path_w);
@@ -47,7 +47,7 @@ fn setFilePermissions(path: []const u8, mode: u32) !void {
 /// - 0o444 (read-only) if FILE_ATTRIBUTE_READONLY is set
 /// - 0o666 (read-write) otherwise
 fn getFilePermissions(path: []const u8) !u32 {
-    const path_w = try std.unicode.utf8ToUtf16LeWithNull(std.heap.page_allocator, path);
+    const path_w = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, path);
     defer std.heap.page_allocator.free(path_w);
 
     const attrs = try windows.GetFileAttributesWZ(path_w);
@@ -62,7 +62,7 @@ fn getFilePermissions(path: []const u8) !u32 {
 
 /// Set file modification time using SetFileTime
 fn setFileTime(path: []const u8, mtime: i64) !void {
-    const path_w = try std.unicode.utf8ToUtf16LeWithNull(
+    const path_w = try std.unicode.utf8ToUtf16LeAllocZ(
         std.heap.page_allocator,
         path,
     );
@@ -98,13 +98,13 @@ fn setFileTime(path: []const u8, mtime: i64) !void {
 /// Note: On Windows 10 and later with Developer Mode enabled,
 /// symlinks can be created without administrator privileges
 fn createSymlink(target: []const u8, link_path: []const u8) !void {
-    const target_w = try std.unicode.utf8ToUtf16LeWithNull(
+    const target_w = try std.unicode.utf8ToUtf16LeAllocZ(
         std.heap.page_allocator,
         target,
     );
     defer std.heap.page_allocator.free(target_w);
 
-    const link_w = try std.unicode.utf8ToUtf16LeWithNull(
+    const link_w = try std.unicode.utf8ToUtf16LeAllocZ(
         std.heap.page_allocator,
         link_path,
     );
@@ -130,8 +130,11 @@ fn readSymlink(allocator: std.mem.Allocator, link_path: []const u8) ![]u8 {
 
 /// Check if path is a symbolic link
 fn isSymlink(path: []const u8) bool {
-    const st = std.fs.cwd().lstat(path) catch return false;
-    return st.kind == .sym_link;
+    const path_w = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, path) catch return false;
+    defer std.heap.page_allocator.free(path_w);
+
+    const attrs = windows.GetFileAttributesWZ(path_w) catch return false;
+    return (attrs & windows.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
 }
 
 /// Get platform name

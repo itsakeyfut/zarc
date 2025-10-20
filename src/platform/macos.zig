@@ -24,7 +24,9 @@ pub const platform = common.Platform{
 
 /// Set file permissions using POSIX chmod
 fn setFilePermissions(path: []const u8, mode: u32) !void {
-    try std.fs.cwd().chmod(path, mode);
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+    try file.chmod(@as(u16, @intCast(mode & 0o7777)));
 }
 
 /// Get file permissions using POSIX stat
@@ -71,8 +73,12 @@ fn readSymlink(allocator: std.mem.Allocator, link_path: []const u8) ![]u8 {
 
 /// Check if path is a symbolic link using lstat
 fn isSymlink(path: []const u8) bool {
-    const st = std.fs.cwd().lstat(path) catch return false;
-    return st.kind == .sym_link;
+    const stat = std.posix.fstatat(
+        std.posix.AT.FDCWD,
+        path,
+        std.posix.AT.SYMLINK_NOFOLLOW,
+    ) catch return false;
+    return std.posix.S.ISLNK(stat.mode);
 }
 
 /// Get platform name
