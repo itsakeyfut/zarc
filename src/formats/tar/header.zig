@@ -127,10 +127,11 @@ pub const TarHeader = struct {
         @memcpy(@as([*]u8, @ptrCast(&header))[0..BLOCK_SIZE], data);
 
         // Verify USTAR magic
-        // Accept both POSIX ustar ("ustar\x00") and GNU tar ("ustar  ")
+        // Accept both POSIX ustar ("ustar\x00","00") and GNU old tar ("ustar ","  ")
         const is_posix_ustar = std.mem.eql(u8, header.magic[0..6], "ustar\x00") and
             std.mem.eql(u8, header.version[0..2], "00");
-        const is_gnu_tar = std.mem.startsWith(u8, header.magic[0..6], "ustar");
+        const is_gnu_tar = std.mem.eql(u8, header.magic[0..6], "ustar ") and
+            std.mem.eql(u8, header.version[0..2], "  ");
 
         if (!is_posix_ustar and !is_gnu_tar) {
             return error.CorruptedHeader;
@@ -446,7 +447,6 @@ pub fn createHeader(entry: *const types.Entry, allocator: std.mem.Allocator) !Ta
     if (mtime_str.len < header.mtime.len) {
         header.mtime[mtime_str.len] = 0;
     }
-
 
     // Set type flag
     header.typeflag = switch (entry.entry_type) {

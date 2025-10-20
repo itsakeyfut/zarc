@@ -28,6 +28,10 @@ const errors = @import("../../core/errors.zig");
 /// }
 /// ```
 pub const TarReader = struct {
+    /// Maximum size for GNU long name/link extensions (16 MiB)
+    /// Prevents pathological archives from forcing huge allocations
+    const MAX_GNU_EXTENSION_SIZE: u64 = 16 * 1024 * 1024;
+
     allocator: std.mem.Allocator,
     file: std.fs.File,
 
@@ -289,12 +293,13 @@ pub const TarReader = struct {
         }
 
         // Try to seek (faster than reading)
-        self.file.seekBy(@intCast(padding)) catch {
+        self.file.seekBy(@as(i64, @intCast(padding))) catch {
             // If seek fails, read and discard
             var discard_buffer: [512]u8 = undefined;
-            const n = try self.file.readAll(discard_buffer[0..padding]);
+            const to_read: usize = @intCast(padding);
+            const n = try self.file.readAll(discard_buffer[0..to_read]);
 
-            if (n != padding) {
+            if (n != to_read) {
                 return error.IncompleteArchive;
             }
         };
@@ -313,13 +318,18 @@ pub const TarReader = struct {
     fn readGnuLongName(self: *TarReader, tar_header: *const header.TarHeader) !void {
         const name_size = try tar_header.getSize();
 
+        // Guard against pathological sizes
+        if (name_size > MAX_GNU_EXTENSION_SIZE) {
+            return error.CorruptedHeader;
+        }
+
         // Free previous long name if any
         if (self.gnu_long_name) |old_name| {
             self.allocator.free(old_name);
         }
 
         // Allocate buffer for long name
-        const name_buffer = try self.allocator.alloc(u8, name_size);
+        const name_buffer = try self.allocator.alloc(u8, @intCast(name_size));
         errdefer self.allocator.free(name_buffer);
 
         // Read name data
@@ -330,12 +340,8 @@ pub const TarReader = struct {
 
         self.file_position += name_size;
 
-        // Skip padding to 512-byte boundary
-        const padding = calculatePadding(name_size);
-        if (padding > 0) {
-            try self.file.seekBy(@intCast(padding));
-            self.file_position += padding;
-        }
+        // Skip padding to 512-byte boundary (with seek/read fallback)
+        try self.skipPadding(name_size);
 
         // Remove null terminator if present
         const actual_len = if (name_size > 0 and name_buffer[name_size - 1] == 0)
@@ -363,13 +369,18 @@ pub const TarReader = struct {
     fn readGnuLongLink(self: *TarReader, tar_header: *const header.TarHeader) !void {
         const link_size = try tar_header.getSize();
 
+        // Guard against pathological sizes
+        if (link_size > MAX_GNU_EXTENSION_SIZE) {
+            return error.CorruptedHeader;
+        }
+
         // Free previous long link if any
         if (self.gnu_long_link) |old_link| {
             self.allocator.free(old_link);
         }
 
         // Allocate buffer for long link
-        const link_buffer = try self.allocator.alloc(u8, link_size);
+        const link_buffer = try self.allocator.alloc(u8, @intCast(link_size));
         errdefer self.allocator.free(link_buffer);
 
         // Read link data
@@ -380,12 +391,8 @@ pub const TarReader = struct {
 
         self.file_position += link_size;
 
-        // Skip padding to 512-byte boundary
-        const padding = calculatePadding(link_size);
-        if (padding > 0) {
-            try self.file.seekBy(@intCast(padding));
-            self.file_position += padding;
-        }
+        // Skip padding to 512-byte boundary (with seek/read fallback)
+        try self.skipPadding(link_size);
 
         // Remove null terminator if present
         const actual_len = if (link_size > 0 and link_buffer[link_size - 1] == 0)
