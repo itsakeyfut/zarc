@@ -9,6 +9,7 @@ pub const core = struct {
 
 // Format modules
 pub const formats = struct {
+    pub const archive = @import("formats/archive.zig");
     pub const tar = struct {
         pub const header = @import("formats/tar/header.zig");
         pub const reader = @import("formats/tar/reader.zig");
@@ -20,6 +21,12 @@ pub const io = struct {
     pub const reader = @import("io/reader.zig");
     pub const writer = @import("io/writer.zig");
     pub const filesystem = @import("io/filesystem.zig");
+};
+
+// Application modules
+pub const app = struct {
+    pub const security = @import("app/security.zig");
+    pub const extract = @import("app/extract.zig");
 };
 
 // Platform abstraction
@@ -41,11 +48,14 @@ test {
     _ = core.errors;
     _ = core.types;
     _ = core.util;
+    _ = formats.archive;
     _ = formats.tar.header;
     _ = formats.tar.reader;
     _ = io.reader;
     _ = io.writer;
     _ = io.filesystem;
+    _ = app.security;
+    _ = app.extract;
     _ = platform.common;
     _ = platform.linux;
     _ = platform.windows;
