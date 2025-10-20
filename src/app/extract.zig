@@ -49,7 +49,7 @@ pub const ExtractResult = struct {
     /// Warning information
     pub const Warning = struct {
         /// Path of the entry that generated the warning
-        entry_path: []const u8,
+        entry_path: []u8,
 
         /// Error that occurred
         err: anyerror,
@@ -68,6 +68,7 @@ pub const ExtractResult = struct {
     pub fn deinit(self: *ExtractResult, allocator: std.mem.Allocator) void {
         for (self.warnings.items) |warning| {
             allocator.free(warning.message);
+            allocator.free(warning.entry_path);
         }
         self.warnings.deinit(allocator);
     }
@@ -79,15 +80,22 @@ pub const ExtractResult = struct {
         entry_path: []const u8,
         err: anyerror,
     ) !void {
-        // Convert anyerror to ZarcError for formatError
-        const zarc_err: errors.ZarcError = @errorCast(err);
-        const message = try errors.formatError(allocator, zarc_err, .{
-            .path = entry_path,
-        });
+        // Format human-readable message
+        // Try to cast to ZarcError for detailed formatting, otherwise use simple message
+        const message = blk: {
+            const zarc_err: errors.ZarcError = @errorCast(err);
+            break :blk errors.formatError(allocator, zarc_err, .{
+                .path = entry_path,
+            }) catch try std.fmt.allocPrint(allocator, "Error: {s}\nFile: {s}", .{ @errorName(err), entry_path });
+        };
         errdefer allocator.free(message);
 
+        // Persist entry_path
+        const path_copy = try allocator.alloc(u8, entry_path.len);
+        @memcpy(path_copy, entry_path);
+
         try self.warnings.append(allocator, .{
-            .entry_path = entry_path,
+            .entry_path = path_copy,
             .err = err,
             .message = message,
         });
@@ -234,7 +242,7 @@ fn extractEntry(
     // Extract based on entry type
     switch (entry.entry_type) {
         .directory => {
-            try extractDirectory(entry, dest_dir, options);
+            try extractDirectory(validated_path, entry, dest_dir, options);
         },
         .file => {
             try extractFile(
@@ -270,19 +278,20 @@ fn extractEntry(
 
 /// Extract a directory entry
 fn extractDirectory(
+    validated_path: []const u8,
     entry: types.Entry,
     dest_dir: std.fs.Dir,
     options: ExtractOptions,
 ) !void {
     // Create directory (makePath creates parent directories as needed)
-    try dest_dir.makePath(entry.path);
+    try dest_dir.makePath(validated_path);
 
     // Set permissions if requested
     if (options.preserve_permissions and options.security_policy.preserve_permissions) {
         // Get absolute path for platform-specific operations
         const abs_path = try dest_dir.realpathAlloc(
             std.heap.page_allocator,
-            entry.path,
+            validated_path,
         );
         defer std.heap.page_allocator.free(abs_path);
 
@@ -294,7 +303,7 @@ fn extractDirectory(
     if (options.preserve_timestamps) {
         const abs_path = try dest_dir.realpathAlloc(
             std.heap.page_allocator,
-            entry.path,
+            validated_path,
         );
         defer std.heap.page_allocator.free(abs_path);
 
@@ -342,13 +351,15 @@ fn extractFile(
     var buffer: [types.BufferSize.default]u8 = undefined;
 
     while (bytes_written < entry.size) {
-        const to_read = @min(buffer.len, entry.size - bytes_written);
-        const n = try reader.read(buffer[0..to_read]);
+        const remaining: u64 = entry.size - bytes_written;
+        const to_read_u64: u64 = if (remaining > buffer.len) buffer.len else remaining;
+        const to_read: usize = @intCast(to_read_u64);
+        const n: usize = try reader.read(buffer[0..to_read]);
 
         if (n == 0) {
             // Unexpected EOF
             std.log.err("Unexpected end of data for: {s} (expected {d} bytes, got {d})", .{
-                entry.path,
+                validated_path,
                 entry.size,
                 bytes_written,
             });
@@ -356,13 +367,13 @@ fn extractFile(
         }
 
         try file.writeAll(buffer[0..n]);
-        bytes_written += n;
+        bytes_written += @as(u64, n);
     }
 
     // Verify we read exactly the right amount
     if (bytes_written != entry.size) {
         std.log.err("Size mismatch for {s}: expected {d}, got {d}", .{
-            entry.path,
+            validated_path,
             entry.size,
             bytes_written,
         });
@@ -415,7 +426,12 @@ fn extractSymlink(
         }
     }
 
-    // Create symlink
+    // Create symlink (optionally overwrite)
+    if (options.overwrite) {
+        dest_dir.deleteFile(validated_path) catch |e| {
+            if (e != error.FileNotFound) return e;
+        };
+    }
     try dest_dir.symLink(entry.link_target, validated_path, .{});
 
     // Note: We don't set permissions on symlinks as they're typically
@@ -432,19 +448,21 @@ fn extractHardlink(
     dest_dir: std.fs.Dir,
     options: ExtractOptions,
 ) !void {
-    _ = options;
-
-    // Validate link target path
-    const validated_target = try security.sanitizePath(
-        entry.link_target,
-        .{}, // Use default security policy for target
-    );
+    // Validate link target path with configured policy
+    const validated_target = try security.sanitizePath(entry.link_target, options.security_policy);
 
     // Ensure parent directories exist
     if (std.fs.path.dirname(validated_path)) |parent| {
         if (parent.len > 0) {
             try dest_dir.makePath(parent);
         }
+    }
+
+    // Honor overwrite
+    if (options.overwrite) {
+        dest_dir.deleteFile(validated_path) catch |e| {
+            if (e != error.FileNotFound) return e;
+        };
     }
 
     // Create hard link
@@ -462,7 +480,7 @@ fn extractHardlink(
     });
     defer std.heap.page_allocator.free(abs_link);
 
-    // Use std.posix.link for POSIX systems
+    // Use std.posix.link for creating hardlink
     try std.posix.link(abs_target, abs_link);
 }
 

@@ -121,6 +121,11 @@ pub fn sanitizePath(path: []const u8, policy: SecurityPolicy) ![]const u8 {
                 return error.AbsolutePathNotAllowed;
             }
         }
+        // UNC / Win32 namespace (\\server\share, \\?\C:\..., //server/share)
+        if (path.len >= 2 and ((path[0] == '\\' and path[1] == '\\') or (path[0] == '/' and path[1] == '/'))) {
+            std.log.warn("UNC absolute path not allowed: {s}", .{path});
+            return error.AbsolutePathNotAllowed;
+        }
     }
 
     // Path traversal check
@@ -301,8 +306,14 @@ pub fn validateSymlink(
             const normalized_dest = try std.fs.path.resolve(allocator, &[_][]const u8{dest_dir});
             defer allocator.free(normalized_dest);
 
-            // Check if resolved target is under normalized_dest
-            if (!std.mem.startsWith(u8, resolved_target, normalized_dest)) {
+            // Check if resolved target is within normalized_dest (path-segment boundary)
+            const within = blk: {
+                if (!std.mem.startsWith(u8, resolved_target, normalized_dest)) break :blk false;
+                if (resolved_target.len == normalized_dest.len) break :blk true;
+                const next = resolved_target[normalized_dest.len];
+                break :blk (next == '/' or next == '\\');
+            };
+            if (!within) {
                 std.log.warn("Symlink escape attempt: {s} -> {s} (resolves to {s})", .{
                     link_path,
                     target,
