@@ -10,6 +10,13 @@ const errors = @import("../core/errors.zig");
 ///
 /// Design Pattern: VTable-based polymorphism
 ///
+/// IMPORTANT - Entry Ownership and Lifetime:
+/// The Entry returned by next() is borrowed and only valid until the next call
+/// to next(). The implementation may reuse internal buffers, so all string fields
+/// (path, uname, gname, link_target) in the Entry become invalid after the next
+/// next() call. Callers who need to retain Entry data beyond the next iteration
+/// must deep-clone the Entry and its string fields before calling next() again.
+///
 /// Example usage:
 /// ```zig
 /// const file = try std.fs.cwd().openFile("archive.tar", .{});
@@ -20,6 +27,7 @@ const errors = @import("../core/errors.zig");
 ///
 /// var archive = tar_reader.archiveReader();
 ///
+/// // Basic iteration (entry only valid within loop body)
 /// while (try archive.next()) |entry| {
 ///     std.debug.print("Entry: {s}\n", .{entry.path});
 ///
@@ -29,6 +37,35 @@ const errors = @import("../core/errors.zig");
 ///         if (n == 0) break;
 ///         // Process data...
 ///     }
+/// }
+///
+/// // Retaining entries (requires deep cloning)
+/// var entries = std.array_list.AlignedManaged(types.Entry, null).init(allocator);
+/// defer {
+///     for (entries.items) |entry| {
+///         allocator.free(entry.path);
+///         allocator.free(entry.uname);
+///         allocator.free(entry.gname);
+///         allocator.free(entry.link_target);
+///     }
+///     entries.deinit();
+/// }
+///
+/// while (try archive.next()) |entry| {
+///     // Clone entry for retention
+///     const owned = types.Entry{
+///         .path = try allocator.dupe(u8, entry.path),
+///         .uname = try allocator.dupe(u8, entry.uname),
+///         .gname = try allocator.dupe(u8, entry.gname),
+///         .link_target = try allocator.dupe(u8, entry.link_target),
+///         .entry_type = entry.entry_type,
+///         .size = entry.size,
+///         .mode = entry.mode,
+///         .mtime = entry.mtime,
+///         .uid = entry.uid,
+///         .gid = entry.gid,
+///     };
+///     try entries.append(owned);
 /// }
 /// ```
 pub const ArchiveReader = struct {
@@ -293,17 +330,53 @@ pub const ArchiveWriter = struct {
     }
 };
 
+/// Clone a string slice using the provided allocator
+fn cloneSlice(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
+    return try allocator.dupe(u8, s);
+}
+
+/// Deep-clone an Entry, duplicating all string fields
+fn cloneEntry(allocator: std.mem.Allocator, e: types.Entry) !types.Entry {
+    var out = e;
+    out.path = try cloneSlice(allocator, e.path);
+    errdefer allocator.free(out.path);
+    out.uname = try cloneSlice(allocator, e.uname);
+    errdefer allocator.free(out.uname);
+    out.gname = try cloneSlice(allocator, e.gname);
+    errdefer allocator.free(out.gname);
+    out.link_target = try cloneSlice(allocator, e.link_target);
+    return out;
+}
+
+/// Free all string fields of an Entry
+pub fn freeEntry(allocator: std.mem.Allocator, e: types.Entry) void {
+    allocator.free(e.path);
+    allocator.free(e.uname);
+    allocator.free(e.gname);
+    allocator.free(e.link_target);
+}
+
+/// Free a slice of entries and their string fields
+pub fn freeEntries(allocator: std.mem.Allocator, entries: []types.Entry) void {
+    for (entries) |e| freeEntry(allocator, e);
+    allocator.free(entries);
+}
+
 /// Helper function to read all entries from an archive
 ///
 /// Convenience function that reads all entries into a slice.
 /// Useful for listing archive contents.
+///
+/// IMPORTANT: This function deep-clones all entries to avoid use-after-free
+/// issues. The caller must call freeEntries() to properly free the returned
+/// entries and their string fields.
 ///
 /// Parameters:
 ///   - allocator: Memory allocator
 ///   - archive: Archive reader
 ///
 /// Returns:
-///   - Slice of all entries (caller must free)
+///   - Slice of all entries (caller must use freeEntries to free)
 ///
 /// Errors:
 ///   - error.OutOfMemory: Failed to allocate memory
@@ -312,7 +385,7 @@ pub const ArchiveWriter = struct {
 /// Example:
 /// ```zig
 /// const entries = try readAllEntries(allocator, &archive);
-/// defer allocator.free(entries);
+/// defer freeEntries(allocator, entries);
 ///
 /// for (entries) |entry| {
 ///     std.debug.print("{}\n", .{entry});
@@ -323,18 +396,39 @@ pub fn readAllEntries(
     archive: *ArchiveReader,
 ) ![]types.Entry {
     var entries = std.array_list.AlignedManaged(types.Entry, null).init(allocator);
-    errdefer entries.deinit();
+    errdefer {
+        for (entries.items) |e| freeEntry(allocator, e);
+        entries.deinit();
+    }
 
     while (try archive.next()) |entry| {
-        try entries.append(entry);
+        const owned = try cloneEntry(allocator, entry);
+        errdefer freeEntry(allocator, owned);
+        try entries.append(owned);
     }
 
     return entries.toOwnedSlice();
 }
 
+/// Validate that a path is relative and does not contain directory traversal
+fn validateRelativePath(p: []const u8) !void {
+    if (p.len == 0 or std.fs.path.isAbsolute(p)) return error.InvalidPath;
+    var it = std.mem.splitAny(u8, p, "/\\");
+    while (it.next()) |seg| {
+        if (seg.len == 0 or std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, ".."))
+            return error.InvalidPath;
+    }
+}
+
 /// Helper function to extract all entries from an archive to a directory
 ///
 /// Convenience function that extracts all files to the specified destination.
+///
+/// Security:
+///   - Validates paths to prevent directory traversal attacks
+///   - Rejects absolute paths and ".." segments
+///   - Creates parent directories as needed
+///   - Uses exclusive file creation to avoid symlink attacks
 ///
 /// Parameters:
 ///   - allocator: Memory allocator
@@ -345,6 +439,7 @@ pub fn readAllEntries(
 ///   - error.OutOfMemory: Failed to allocate memory
 ///   - error.FileNotFound: Destination directory does not exist
 ///   - error.PermissionDenied: Insufficient permissions
+///   - error.InvalidPath: Path contains traversal or is absolute
 ///   - (All ArchiveReader errors)
 ///
 /// Example:
@@ -357,14 +452,21 @@ pub fn extractAllEntries(
     dest_dir: std.fs.Dir,
 ) !void {
     while (try archive.next()) |entry| {
+        try validateRelativePath(entry.path);
+
         switch (entry.entry_type) {
             .directory => {
                 // Create directory
                 try dest_dir.makePath(entry.path);
             },
             .file => {
-                // Create file and write data
-                const file = try dest_dir.createFile(entry.path, .{});
+                // Ensure parent directories exist
+                if (std.fs.path.dirname(entry.path)) |parent| {
+                    if (parent.len > 0) try dest_dir.makePath(parent);
+                }
+
+                // Create file (exclusive to avoid clobber and symlink surprises)
+                const file = try dest_dir.createFile(entry.path, .{ .exclusive = true });
                 defer file.close();
 
                 var buffer: [types.BufferSize.default]u8 = undefined;
@@ -375,6 +477,8 @@ pub fn extractAllEntries(
                 }
             },
             .symlink => {
+                // Validate symlink target as well
+                try validateRelativePath(entry.link_target);
                 // Create symlink
                 try dest_dir.symLink(entry.link_target, entry.path, .{});
             },
@@ -506,7 +610,7 @@ test "readAllEntries: empty archive" {
     var archive = test_reader.archiveReader();
 
     const entries = try readAllEntries(allocator, &archive);
-    defer allocator.free(entries);
+    defer freeEntries(allocator, entries);
 
     try std.testing.expectEqual(@as(usize, 0), entries.len);
 }
