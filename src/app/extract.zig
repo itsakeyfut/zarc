@@ -120,7 +120,7 @@ pub const ExtractResult = struct {
             error.SymlinkNotAllowed,
             error.AbsoluteSymlinkNotAllowed,
             error.NullByteInFilename,
-            => |zarc_err| errors.formatError(allocator, zarc_err, .{
+            => errors.formatError(allocator, @errorCast(err), .{
                 .path = entry_path,
             }) catch try std.fmt.allocPrint(allocator, "Error: {s}\nFile: {s}", .{ @errorName(err), entry_path }),
             else => try std.fmt.allocPrint(allocator, "Error: {s}\nFile: {s}", .{ @errorName(err), entry_path }),
