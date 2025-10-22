@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const platform_common = @import("../../src/platform/common.zig");
+const zarc = @import("zarc");
+const platform_common = zarc.platform.common;
 
 // Platform abstraction integration tests
 //
@@ -10,14 +11,10 @@ const platform_common = @import("../../src/platform/common.zig");
 test "Platform: getPlatform returns valid implementation" {
     const platform = platform_common.getPlatform();
 
-    // Verify all function pointers are non-null
-    try std.testing.expect(platform.setFilePermissions != null);
-    try std.testing.expect(platform.getFilePermissions != null);
-    try std.testing.expect(platform.setFileTime != null);
-    try std.testing.expect(platform.createSymlink != null);
-    try std.testing.expect(platform.readSymlink != null);
-    try std.testing.expect(platform.isSymlink != null);
-    try std.testing.expect(platform.getPlatformName != null);
+    // Verify platform is initialized (function pointers are guaranteed non-null in Zig)
+    // Just verify we can get the platform name
+    const name = platform.getPlatformName();
+    try std.testing.expect(name.len > 0);
 }
 
 test "Platform: getPlatformName returns correct name" {
