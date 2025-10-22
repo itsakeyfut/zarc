@@ -19,6 +19,7 @@ pub const platform = common.Platform{
     .createSymlink = createSymlink,
     .readSymlink = readSymlink,
     .isSymlink = isSymlink,
+    .createHardLink = createHardLink,
     .getPlatformName = getPlatformName,
 };
 
@@ -79,6 +80,17 @@ fn isSymlink(path: []const u8) bool {
         std.posix.AT.SYMLINK_NOFOLLOW,
     ) catch return false;
     return std.posix.S.ISLNK(stat.mode);
+}
+
+/// Create hard link using POSIX link()
+fn createHardLink(target: []const u8, link_path: []const u8) !void {
+    var target_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+    const target_z = try std.fmt.bufPrintZ(&target_buf, "{s}", .{target});
+
+    var link_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+    const link_z = try std.fmt.bufPrintZ(&link_buf, "{s}", .{link_path});
+
+    try std.posix.link(target_z, link_z);
 }
 
 /// Get platform name

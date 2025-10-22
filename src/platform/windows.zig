@@ -4,6 +4,7 @@ const windows = std.os.windows;
 
 // Windows API functions not in std.os.windows
 extern "kernel32" fn SetFileAttributesW(lpFileName: [*:0]const u16, dwFileAttributes: windows.DWORD) callconv(std.builtin.CallingConvention.winapi) windows.BOOL;
+extern "kernel32" fn CreateHardLinkW(lpFileName: [*:0]const u16, lpExistingFileName: [*:0]const u16, lpSecurityAttributes: ?*anyopaque) callconv(std.builtin.CallingConvention.winapi) windows.BOOL;
 
 /// Windows-specific platform implementation
 ///
@@ -21,6 +22,7 @@ pub const platform = common.Platform{
     .createSymlink = createSymlink,
     .readSymlink = readSymlink,
     .isSymlink = isSymlink,
+    .createHardLink = createHardLink,
     .getPlatformName = getPlatformName,
 };
 
@@ -145,6 +147,19 @@ fn isSymlink(path: []const u8) bool {
 
     const attrs = windows.GetFileAttributesW(path_w.ptr) catch return false;
     return (attrs & windows.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+}
+
+/// Create hard link using CreateHardLinkW
+fn createHardLink(target: []const u8, link_path: []const u8) !void {
+    const target_w = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, target);
+    defer std.heap.page_allocator.free(target_w);
+
+    const link_w = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, link_path);
+    defer std.heap.page_allocator.free(link_w);
+
+    if (CreateHardLinkW(link_w.ptr, target_w.ptr, null) == 0) {
+        return windows.unexpectedError(windows.GetLastError());
+    }
 }
 
 /// Get platform name

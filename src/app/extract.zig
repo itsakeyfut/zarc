@@ -517,8 +517,9 @@ fn extractHardlink(
     });
     defer std.heap.page_allocator.free(abs_link);
 
-    // Use std.posix.link for creating hardlink
-    try std.posix.link(abs_target, abs_link);
+    // Create hardlink using platform abstraction
+    const plat = platform.getPlatform();
+    try plat.createHardLink(abs_target, abs_link);
 }
 
 // Tests
