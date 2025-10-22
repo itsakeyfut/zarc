@@ -64,13 +64,26 @@ pub fn main() !void {
     const cli_args = if (args.len > 1) args[1..] else &[_][]const u8{};
 
     // Parse arguments
-    const parsed = try cli.args.parseArgs(allocator, cli_args);
+    const parsed = cli.args.parseArgs(allocator, cli_args) catch |err| {
+        const stderr_file = std.fs.File.stderr();
+        var err_out = cli.output.OutputWriter.init(stderr_file, .normal, .auto);
+        err_out.printError("Failed to parse arguments: {s}", .{@errorName(err)}) catch {};
+        stderr_file.writeAll("Use 'zarc help' for usage.\n") catch {};
+        std.process.exit(2);
+    };
     defer parsed.deinit(allocator);
 
     // Execute command
-    var exit_code: u8 = 0;
+    var exit_code: u8 = 1; // default to failure unless proven otherwise
     defer std.process.exit(exit_code);
-    exit_code = try executeCommand(allocator, parsed);
+    exit_code = executeCommand(allocator, parsed) catch |err| blk: {
+        // Common CLI behavior: ignore SIGPIPE/BrokenPipe as success
+        if (err == error.BrokenPipe) break :blk 0;
+        const stderr_file = std.fs.File.stderr();
+        var err_out = cli.output.OutputWriter.init(stderr_file, .normal, .auto);
+        err_out.printError("Unexpected error: {s}", .{@errorName(err)}) catch {};
+        break :blk 1;
+    };
 }
 
 fn executeCommand(allocator: std.mem.Allocator, parsed: cli.args.ParsedArgs) !u8 {

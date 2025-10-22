@@ -68,18 +68,12 @@ pub const OutputWriter = struct {
             .always => true,
             .never => false,
             .auto => blk: {
-                // Check environment variables (POSIX only)
-                const builtin = @import("builtin");
-                if (builtin.os.tag != .windows) {
-                    const no_color = std.posix.getenv("NO_COLOR");
-                    if (no_color != null and no_color.?.len > 0) {
-                        break :blk false;
-                    }
-
-                    const zarc_no_color = std.posix.getenv("ZARC_NO_COLOR");
-                    if (zarc_no_color != null and zarc_no_color.?.len > 0) {
-                        break :blk false;
-                    }
+                // NO_COLOR and ZARC_NO_COLOR: presence disables color (any OS)
+                if (std.process.hasEnvVar(std.heap.page_allocator, "NO_COLOR") catch false) {
+                    break :blk false;
+                }
+                if (std.process.hasEnvVar(std.heap.page_allocator, "ZARC_NO_COLOR") catch false) {
+                    break :blk false;
                 }
 
                 // Check if the target file is a TTY
