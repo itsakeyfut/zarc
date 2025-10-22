@@ -89,7 +89,7 @@ pub fn runExtract(
 
     // Print warnings
     if (result.warnings.items.len > 0) {
-        try out.printWarning("{d} warnings occurred:", .{result.warnings.items.len});
+        try err_out.printWarning("{d} warnings occurred:", .{result.warnings.items.len});
         for (result.warnings.items) |warning| {
             try err_out.printWarning("  {s}: {s}", .{ warning.entry_path, warning.message });
         }

@@ -2,6 +2,9 @@ const std = @import("std");
 const common = @import("common.zig");
 const windows = std.os.windows;
 
+// Windows API functions not in std.os.windows
+extern "kernel32" fn SetFileAttributesW(lpFileName: [*:0]const u16, dwFileAttributes: windows.DWORD) callconv(std.builtin.CallingConvention.winapi) windows.BOOL;
+
 /// Windows-specific platform implementation
 ///
 /// This module implements platform-specific operations for Windows.
@@ -30,15 +33,17 @@ fn setFilePermissions(path: []const u8, mode: u32) !void {
     const path_w = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, path);
     defer std.heap.page_allocator.free(path_w);
 
-    const attrs = try windows.GetFileAttributesWZ(path_w);
+    const attrs = try windows.GetFileAttributesW(path_w.ptr);
 
     // Check if write permission is set (owner write bit)
     const new_attrs: windows.DWORD = if ((mode & 0o200) != 0)
-        attrs & ~windows.FILE_ATTRIBUTE_READONLY
+        attrs & ~@as(windows.DWORD, windows.FILE_ATTRIBUTE_READONLY)
     else
-        attrs | windows.FILE_ATTRIBUTE_READONLY;
+        attrs | @as(windows.DWORD, windows.FILE_ATTRIBUTE_READONLY);
 
-    try windows.SetFileAttributesWZ(path_w, new_attrs);
+    if (SetFileAttributesW(path_w.ptr, new_attrs) == 0) {
+        return windows.unexpectedError(windows.GetLastError());
+    }
 }
 
 /// Get file permissions (approximated from Windows attributes)
@@ -50,7 +55,7 @@ fn getFilePermissions(path: []const u8) !u32 {
     const path_w = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, path);
     defer std.heap.page_allocator.free(path_w);
 
-    const attrs = try windows.GetFileAttributesWZ(path_w);
+    const attrs = try windows.GetFileAttributesW(path_w.ptr);
 
     // Check if read-only attribute is set
     if ((attrs & windows.FILE_ATTRIBUTE_READONLY) != 0) {
@@ -68,7 +73,7 @@ fn setFileTime(path: []const u8, mtime: i64) !void {
     );
     defer std.heap.page_allocator.free(path_w);
 
-    const handle = try windows.CreateFileW(
+    const handle = windows.kernel32.CreateFileW(
         path_w.ptr,
         windows.FILE_WRITE_ATTRIBUTES,
         windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE,
@@ -77,7 +82,10 @@ fn setFileTime(path: []const u8, mtime: i64) !void {
         windows.FILE_ATTRIBUTE_NORMAL,
         null,
     );
-    defer windows.CloseHandle(handle);
+    if (handle == windows.INVALID_HANDLE_VALUE) {
+        return windows.unexpectedError(windows.GetLastError());
+    }
+    defer _ = windows.CloseHandle(handle);
 
     // Convert Unix timestamp to Windows FILETIME
     // Windows FILETIME is 100-nanosecond intervals since 1601-01-01
@@ -90,7 +98,9 @@ fn setFileTime(path: []const u8, mtime: i64) !void {
     filetime.dwLowDateTime = @as(u32, @truncate(@as(u64, @bitCast(windows_time))));
     filetime.dwHighDateTime = @as(u32, @truncate(@as(u64, @bitCast(windows_time)) >> 32));
 
-    try windows.SetFileTime(handle, null, null, &filetime);
+    if (windows.kernel32.SetFileTime(handle, null, null, &filetime) == 0) {
+        return windows.unexpectedError(windows.kernel32.GetLastError());
+    }
 }
 
 /// Create symbolic link using CreateSymbolicLinkW
@@ -133,7 +143,7 @@ fn isSymlink(path: []const u8) bool {
     const path_w = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, path) catch return false;
     defer std.heap.page_allocator.free(path_w);
 
-    const attrs = windows.GetFileAttributesWZ(path_w) catch return false;
+    const attrs = windows.GetFileAttributesW(path_w.ptr) catch return false;
     return (attrs & windows.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
 }
 

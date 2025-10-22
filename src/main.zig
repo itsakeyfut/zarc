@@ -68,8 +68,9 @@ pub fn main() !void {
     defer parsed.deinit(allocator);
 
     // Execute command
-    const exit_code = try executeCommand(allocator, parsed);
-    std.process.exit(exit_code);
+    var exit_code: u8 = 0;
+    defer std.process.exit(exit_code);
+    exit_code = try executeCommand(allocator, parsed);
 }
 
 fn executeCommand(allocator: std.mem.Allocator, parsed: cli.args.ParsedArgs) !u8 {

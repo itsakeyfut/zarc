@@ -58,30 +58,32 @@ pub const OutputWriter = struct {
         return .{
             .file = file,
             .level = level,
-            .use_color = shouldUseColor(color_mode),
+            .use_color = shouldUseColor(color_mode, file),
         };
     }
 
     /// Determine if colors should be used
-    fn shouldUseColor(mode: ColorMode) bool {
+    fn shouldUseColor(mode: ColorMode, file: std.fs.File) bool {
         return switch (mode) {
             .always => true,
             .never => false,
             .auto => blk: {
-                // Check environment variables
-                const no_color = std.posix.getenv("NO_COLOR");
-                if (no_color != null and no_color.?.len > 0) {
-                    break :blk false;
+                // Check environment variables (POSIX only)
+                const builtin = @import("builtin");
+                if (builtin.os.tag != .windows) {
+                    const no_color = std.posix.getenv("NO_COLOR");
+                    if (no_color != null and no_color.?.len > 0) {
+                        break :blk false;
+                    }
+
+                    const zarc_no_color = std.posix.getenv("ZARC_NO_COLOR");
+                    if (zarc_no_color != null and zarc_no_color.?.len > 0) {
+                        break :blk false;
+                    }
                 }
 
-                const zarc_no_color = std.posix.getenv("ZARC_NO_COLOR");
-                if (zarc_no_color != null and zarc_no_color.?.len > 0) {
-                    break :blk false;
-                }
-
-                // Check if stdout is a TTY
-                const stdout_file = std.fs.File.stdout();
-                break :blk stdout_file.isTty();
+                // Check if the target file is a TTY
+                break :blk file.isTty();
             },
         };
     }
