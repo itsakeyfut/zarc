@@ -75,13 +75,14 @@ fn setFileTime(path: []const u8, mtime: i64) !void {
     );
     defer std.heap.page_allocator.free(path_w);
 
+    // FILE_FLAG_BACKUP_SEMANTICS is required to open directories
     const handle = windows.kernel32.CreateFileW(
         path_w.ptr,
         windows.FILE_WRITE_ATTRIBUTES,
         windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE,
         null,
         windows.OPEN_EXISTING,
-        windows.FILE_ATTRIBUTE_NORMAL,
+        windows.FILE_FLAG_BACKUP_SEMANTICS,
         null,
     );
     if (handle == windows.INVALID_HANDLE_VALUE) {
