@@ -132,7 +132,7 @@ pub const TarHeader = struct {
             std.mem.eql(u8, header.version[0..2], "00");
         const is_gnu_tar = std.mem.eql(u8, header.magic[0..6], "ustar ") and
             (std.mem.eql(u8, header.version[0..2], "  ") or
-            std.mem.eql(u8, header.version[0..2], " \x00"));
+                std.mem.eql(u8, header.version[0..2], " \x00"));
 
         if (!is_posix_ustar and !is_gnu_tar) {
             return error.CorruptedHeader;
