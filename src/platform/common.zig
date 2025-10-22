@@ -64,6 +64,15 @@ pub const Platform = struct {
     ///   - true if path is a symlink, false otherwise
     isSymlink: *const fn (path: []const u8) bool,
 
+    /// Create a hard link
+    ///
+    /// Parameters:
+    ///   - target: Existing file path
+    ///   - link_path: Path where the hard link will be created
+    ///
+    /// Note: Both paths must be on the same filesystem
+    createHardLink: *const fn (target: []const u8, link_path: []const u8) anyerror!void,
+
     /// Get platform name
     ///
     /// Returns:
