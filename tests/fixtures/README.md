@@ -6,13 +6,16 @@ This directory contains test data used for testing zarc functionality.
 
 ```
 fixtures/
-├── gnu_tar/          # Archives created with GNU tar
+├── gnu_tar/          # Archives created with GNU tar (for compatibility testing)
 │   ├── basic.tar           # Basic uncompressed tar
 │   ├── basic.tar.gz        # Gzip compressed tar
 │   ├── basic.tar.bz2       # Bzip2 compressed tar
+│   ├── basic.tar.xz        # XZ compressed tar
 │   ├── long_filename.tar   # Archive with >100 char filename (GNU extension)
-│   └── unicode.tar         # Archive with Unicode filenames
+│   ├── unicode.tar         # Archive with Unicode filenames
+│   └── with_symlinks.tar   # Archive with symbolic links
 ├── bsd_tar/          # Archives created with BSD tar (macOS)
+│   └── (generated on macOS systems)
 ├── malicious/        # Security test archives
 │   ├── path_traversal.tar  # Contains paths with ../
 │   └── symlink_escape.tar  # Contains symlinks to /etc/passwd
@@ -45,10 +48,32 @@ tar cjf ../gnu_tar/basic.tar.bz2 *
 ## Tool Versions
 
 Test archives were created with:
-- GNU tar 1.35
+- GNU tar 1.35 (Linux)
+- BSD tar (macOS - version varies by OS)
 - gzip 1.12
 - bzip2 1.0.8
-- xz 5.6.3
+- xz 5.4.5 - 5.6.3
+
+## Compatibility Testing
+
+The test fixtures in this directory are used for compatibility testing (Issue #13).
+Compatibility tests verify that zarc can correctly extract archives created by:
+
+1. **GNU tar** - The standard tar implementation on Linux systems
+2. **BSD tar** - The tar implementation on macOS and BSD systems
+
+Tests include:
+- Basic uncompressed archives
+- Gzip/bzip2/xz compressed archives
+- GNU tar extensions (long filenames, sparse files)
+- Unicode filenames
+- Symbolic links
+- Edge cases (empty archives, etc.)
+
+Run compatibility tests with:
+```bash
+zig build test-integration
+```
 
 ## Guidelines
 
