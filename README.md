@@ -1,16 +1,19 @@
-# Zarc
+# zarc - Zig Archive Tool
 
 [![Status](https://img.shields.io/badge/status-active--development-brightgreen?style=flat-square)]()
-[![Rust Version](https://img.shields.io/badge/zig-1.15.2+-orange.svg)](https://ziglang.org/)
+[![Zig Version](https://img.shields.io/badge/zig-0.15.2+-orange.svg)](https://ziglang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-red.svg)](https://opensource.org/licenses/MIT)
 
-A modern, high-performance tool written in Zig.
+A modern, cross-platform archive tool written in Zig. zarc provides a unified interface for working with archive files across different platforms with consistent behavior and strong security guarantees.
 
 ## Features
 
-- Fast and efficient
-- Cross-platform support
-- Written in Zig for maximum performance and safety
+- **Cross-platform**: Consistent behavior on Windows, Linux, and macOS
+- **Secure by default**: Built-in protection against path traversal and zip bomb attacks
+- **tar.gz support**: Extract and list tar archives with gzip compression
+- **User-friendly CLI**: Progress display, colored output, and clear error messages
+- **High performance**: Written in Zig for maximum speed and memory safety
+- **Well-tested**: Comprehensive unit, integration, and compatibility test suites
 
 ## Installation
 
@@ -26,39 +29,179 @@ cd zarc
 zig build
 ```
 
-The compiled binary will be located at `zig-out/bin/zurl`.
+The compiled binary will be located at `zig-out/bin/zarc`.
+
+### Installing
+
+To install the binary to a location in your PATH:
+
+```bash
+# Install to default location (requires appropriate permissions)
+zig build -Doptimize=ReleaseSafe
+sudo cp zig-out/bin/zarc /usr/local/bin/
+
+# Or install to user directory
+mkdir -p ~/.local/bin
+cp zig-out/bin/zarc ~/.local/bin/
+```
 
 ## Usage
 
+### Quick Start
+
 ```bash
-./zig-out/bin/zurl [options]
+# Extract an archive
+zarc extract archive.tar.gz
+
+# Extract to a specific directory
+zarc extract archive.tar.gz /path/to/destination
+zarc extract archive.tar.gz -C /path/to/destination
+
+# List archive contents
+zarc list archive.tar.gz
+
+# List with detailed information
+zarc list archive.tar.gz -l
+
+# Test archive integrity
+zarc test archive.tar.gz
+
+# Show help
+zarc help
+zarc extract --help
 ```
+
+### Common Operations
+
+#### Extracting Archives
+
+```bash
+# Basic extraction
+zarc extract archive.tar.gz
+
+# Extract with verbose output
+zarc extract archive.tar.gz -v
+
+# Extract specific files
+zarc extract archive.tar.gz --include "*.txt"
+
+# Extract excluding certain files
+zarc extract archive.tar.gz --exclude "*.log"
+
+# Overwrite existing files
+zarc extract archive.tar.gz -f
+```
+
+#### Listing Archive Contents
+
+```bash
+# Simple list
+zarc list archive.tar.gz
+
+# Detailed listing with permissions and timestamps
+zarc list archive.tar.gz -l
+
+# Human-readable file sizes
+zarc list archive.tar.gz -lh
+```
+
+#### Testing Archives
+
+```bash
+# Verify archive integrity
+zarc test archive.tar.gz
+
+# Verbose output showing each entry
+zarc test archive.tar.gz -v
+```
+
+### Available Commands
+
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `extract` | `x` | Extract archive contents |
+| `list` | `l`, `ls` | List archive contents |
+| `test` | `t` | Test archive integrity |
+| `help` | `h` | Show help information |
+| `version` | `v` | Show version information |
+
+### Supported Formats (v0.1.0)
+
+- tar (uncompressed)
+- tar.gz / tgz (gzip compressed)
+
+*Note: Additional formats (zip, 7z, bzip2, xz) are planned for future releases.*
 
 ## Development
 
 ### Building
 
 ```bash
+# Debug build (default)
 zig build
+
+# Release build with safety checks (recommended)
+zig build -Doptimize=ReleaseSafe
+
+# Release build with maximum performance
+zig build -Doptimize=ReleaseFast
+
+# Release build with minimum size
+zig build -Doptimize=ReleaseSmall
 ```
 
 ### Running
 
 ```bash
-zig build run
+# Run with arguments
+zig build run -- extract archive.tar.gz
+
+# Or run the binary directly
+./zig-out/bin/zarc extract archive.tar.gz
 ```
 
 ### Testing
 
 ```bash
+# Run all tests
+zig build test-all
+
+# Run unit tests only
+zig build test-unit
+
+# Run integration tests only
+zig build test-integration
+
+# Run embedded tests in source files
 zig build test
 ```
 
-### Build Options
+### Cross-compilation
 
-- `-Doptimize=ReleaseSafe` - Build with optimizations and safety checks
-- `-Doptimize=ReleaseFast` - Build with maximum optimizations
-- `-Doptimize=ReleaseSmall` - Build for minimum binary size
+zarc supports cross-compilation for multiple platforms:
+
+```bash
+# Build for all supported platforms
+zig build build-all
+
+# Build for specific platforms
+zig build build-linux-x86_64
+zig build build-linux-aarch64
+zig build build-windows-x86_64
+zig build build-macos-x86_64
+zig build build-macos-aarch64
+```
+
+Binaries will be placed in `zig-out/bin/` with platform-specific names (e.g., `zarc-linux-x86_64`).
+
+### Documentation
+
+```bash
+# Generate API documentation
+zig build docs
+
+# Documentation will be available in zig-out/docs/
+```
 
 ## Contributing
 
@@ -95,4 +238,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Project Status
 
-This project is in early development. APIs and features may change.
+This project is currently in **Phase 0 - Foundation (v0.1.0)**, focusing on core tar.gz functionality and establishing a solid foundation for future development.
+
+### Roadmap
+
+- **v0.1.0** (Current): tar + gzip support (extract, list, test)
+- **v0.2.0**: zip format support, archive creation (compress)
+- **v0.3.0**: 7z format reading
+- **v0.4.0**: 7z format writing
+- **v1.0.0**: Stable release with C API
+
+For detailed development plans, see the [design documentation](docs/DESIGN_PHILOSOPHY.md).
