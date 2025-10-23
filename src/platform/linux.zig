@@ -33,14 +33,22 @@ fn getFilePermissions(path: []const u8) !u32 {
 
 /// Set file modification time using utimensat
 fn setFileTime(path: []const u8, mtime: i64) !void {
-    const file = try std.fs.cwd().openFile(path, .{ .mode = .read_write });
-    defer file.close();
+    // Convert path to null-terminated string for POSIX call
+    var path_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+    const path_z = try std.fmt.bufPrintZ(&path_buf, "{s}", .{path});
 
-    // Convert Unix timestamp to nanoseconds
-    const atime_nsec: i128 = @as(i128, mtime) * std.time.ns_per_s;
-    const mtime_nsec: i128 = @as(i128, mtime) * std.time.ns_per_s;
+    // Convert Unix timestamp to timespec
+    const times = [2]std.os.linux.timespec{
+        .{ .sec = mtime, .nsec = 0 }, // access time
+        .{ .sec = mtime, .nsec = 0 }, // modification time
+    };
 
-    try file.updateTimes(atime_nsec, mtime_nsec);
+    // Use utimensat which works for both files and directories
+    const rc = std.os.linux.utimensat(std.posix.AT.FDCWD, path_z, &times, 0);
+    switch (std.posix.errno(rc)) {
+        .SUCCESS => return,
+        else => |err| return std.posix.unexpectedErrno(err),
+    }
 }
 
 /// Create symbolic link using POSIX symlink

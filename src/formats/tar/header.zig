@@ -127,11 +127,12 @@ pub const TarHeader = struct {
         @memcpy(@as([*]u8, @ptrCast(&header))[0..BLOCK_SIZE], data);
 
         // Verify USTAR magic
-        // Accept both POSIX ustar ("ustar\x00","00") and GNU old tar ("ustar ","  ")
+        // Accept both POSIX ustar ("ustar\x00","00") and GNU old tar ("ustar "," \x00" or "  ")
         const is_posix_ustar = std.mem.eql(u8, header.magic[0..6], "ustar\x00") and
             std.mem.eql(u8, header.version[0..2], "00");
         const is_gnu_tar = std.mem.eql(u8, header.magic[0..6], "ustar ") and
-            std.mem.eql(u8, header.version[0..2], "  ");
+            (std.mem.eql(u8, header.version[0..2], "  ") or
+                std.mem.eql(u8, header.version[0..2], " \x00"));
 
         if (!is_posix_ustar and !is_gnu_tar) {
             return error.CorruptedHeader;

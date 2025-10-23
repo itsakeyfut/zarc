@@ -40,12 +40,31 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
-    // Integration tests (when tests/integration directory exists)
+    // Shared source module for test imports
     const src_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
+
+    // Unit tests (tests/unit directory)
+    const unit_only_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/unit/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zarc", .module = src_module },
+            },
+        }),
+    });
+
+    const run_unit_only_tests = b.addRunArtifact(unit_only_tests);
+    run_unit_only_tests.setCwd(b.path(".")); // Set working directory to project root
+    const unit_only_step = b.step("test-unit", "Run unit tests only");
+    unit_only_step.dependOn(&run_unit_only_tests.step);
+
+    // Integration tests (tests/integration directory)
 
     const integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -66,6 +85,7 @@ pub fn build(b: *std.Build) void {
     // All tests
     const test_all_step = b.step("test-all", "Run all tests");
     test_all_step.dependOn(&run_unit_tests.step);
+    test_all_step.dependOn(&run_unit_only_tests.step);
     test_all_step.dependOn(&run_integration_tests.step);
 
     // Cross-compilation targets
