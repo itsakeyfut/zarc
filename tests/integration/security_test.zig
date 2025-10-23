@@ -140,9 +140,10 @@ test "checkZipBomb: detects file size exceeds limit" {
     };
 
     // Act & Assert - 2MB file exceeds 1MB limit
+    // Keep ratio = 1:1 to avoid tripping the ratio check
     try std.testing.expectError(
         error.FileSizeExceedsLimit,
-        security.checkZipBomb(1000, 2 * 1024 * 1024, policy),
+        security.checkZipBomb(2 * 1024 * 1024, 2 * 1024 * 1024, policy),
     );
 }
 

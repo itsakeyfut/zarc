@@ -554,7 +554,9 @@ test "createHeader: error - filename too long (>255 without separator)" {
     const allocator = std.testing.allocator;
 
     // Create a path >255 characters without a separator in the right place
-    const long_name = "x" ** 256;
+    var long_name = try allocator.alloc(u8, 256);
+    defer allocator.free(long_name);
+    @memset(long_name, 'x');
     const entry = types.Entry{
         .path = long_name,
         .entry_type = .file,
@@ -575,7 +577,9 @@ test "createHeader: error - filename too long (>255 without separator)" {
 test "createHeader: error - link target too long" {
     // Arrange
     const allocator = std.testing.allocator;
-    const long_link = "x" ** 101; // >100 characters
+    var long_link = try allocator.alloc(u8, 101);
+    defer allocator.free(long_link);
+    @memset(long_link, 'x'); // >100 characters
 
     const entry = types.Entry{
         .path = "link.txt",
