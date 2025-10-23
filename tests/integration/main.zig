@@ -19,6 +19,9 @@ test {
     // Security integration tests
     _ = @import("security_test.zig");
 
+    // Compatibility integration tests (Issue #13)
+    _ = @import("compatibility_test.zig");
+
     // Add more integration test modules here as they are created
     // Example:
     // _ = @import("compression_test.zig");
