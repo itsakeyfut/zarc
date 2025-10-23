@@ -242,8 +242,11 @@ pub const FileSystem = struct {
     ) bool {
         _ = self;
 
-        const stat = std.fs.cwd().statFile(path) catch return false;
-        return stat.kind == .directory;
+        // Try to open as directory - works reliably on all platforms including Windows
+        // statFile() is unreliable for directories on Windows
+        var dir = std.fs.cwd().openDir(path, .{}) catch return false;
+        dir.close();
+        return true;
     }
 
     /// Check if path is a regular file
@@ -658,7 +661,9 @@ test "joinPath and normalizePath" {
     const normalized = try normalizePath(allocator, "foo/./bar/../baz.txt");
     defer allocator.free(normalized);
 
-    try std.testing.expectEqualStrings("foo/baz.txt", normalized);
+    // Use platform-specific path separator
+    const expected = if (builtin.os.tag == .windows) "foo\\baz.txt" else "foo/baz.txt";
+    try std.testing.expectEqualStrings(expected, normalized);
 }
 
 test "dirname and basename" {
