@@ -172,27 +172,33 @@ fi
 # Security test archives
 # ============================================================================
 
-echo "--- Security test archives ---"
+if [ "$TAR_TYPE" = "GNU" ]; then
+    echo "--- Security test archives ---"
 
-# Path traversal archive
-echo -n "Creating path traversal test archive... "
-TEMP_DIR=$(mktemp -d)
-mkdir -p "$TEMP_DIR/safe"
-echo "safe content" > "$TEMP_DIR/safe/file.txt"
-(cd "$TEMP_DIR" && tar cf "$FIXTURES_DIR/malicious/path_traversal.tar" \
-    --transform='s,safe/,../../../etc/,' safe/file.txt)
-rm -rf "$TEMP_DIR"
-echo -e "${GREEN}✓${NC}"
+    # Path traversal archive
+    echo -n "Creating path traversal test archive... "
+    TEMP_DIR=$(mktemp -d)
+    mkdir -p "$TEMP_DIR/safe"
+    echo "safe content" > "$TEMP_DIR/safe/file.txt"
+    (cd "$TEMP_DIR" && tar cf "$FIXTURES_DIR/malicious/path_traversal.tar" \
+        --transform='s,safe/,../../../etc/,' safe/file.txt)
+    rm -rf "$TEMP_DIR"
+    echo -e "${GREEN}✓${NC}"
 
-# Symlink escape archive
-echo -n "Creating symlink escape test archive... "
-TEMP_DIR=$(mktemp -d)
-ln -s /etc/passwd "$TEMP_DIR/escaped_link"
-(cd "$TEMP_DIR" && tar cf "$FIXTURES_DIR/malicious/symlink_escape.tar" escaped_link)
-rm -rf "$TEMP_DIR"
-echo -e "${GREEN}✓${NC}"
+    # Symlink escape archive
+    echo -n "Creating symlink escape test archive... "
+    TEMP_DIR=$(mktemp -d)
+    ln -s /etc/passwd "$TEMP_DIR/escaped_link"
+    (cd "$TEMP_DIR" && tar cf "$FIXTURES_DIR/malicious/symlink_escape.tar" escaped_link)
+    rm -rf "$TEMP_DIR"
+    echo -e "${GREEN}✓${NC}"
 
-echo ""
+    echo ""
+else
+    echo "--- Security test archives ---"
+    echo -e "${YELLOW}⚠${NC} Skipping: requires GNU tar for --transform support"
+    echo ""
+fi
 
 # ============================================================================
 # Summary
