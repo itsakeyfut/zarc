@@ -10,7 +10,7 @@ A modern, cross-platform archive tool written in Zig. zarc provides a unified in
 
 - **Cross-platform**: Consistent behavior on Windows, Linux, and macOS
 - **Secure by default**: Built-in protection against path traversal and zip bomb attacks
-- **tar.gz support**: Extract and list tar archives with gzip compression
+- **tar support**: Extract and list tar archives (uncompressed)
 - **User-friendly CLI**: Progress display, colored output, and clear error messages
 - **High performance**: Written in Zig for maximum speed and memory safety
 - **Well-tested**: Comprehensive unit, integration, and compatibility test suites
@@ -51,20 +51,20 @@ cp zig-out/bin/zarc ~/.local/bin/
 
 ```bash
 # Extract an archive
-zarc extract archive.tar.gz
+zarc extract archive.tar
 
 # Extract to a specific directory
-zarc extract archive.tar.gz /path/to/destination
-zarc extract archive.tar.gz -C /path/to/destination
+zarc extract archive.tar /path/to/destination
+zarc extract archive.tar -C /path/to/destination
 
 # List archive contents
-zarc list archive.tar.gz
+zarc list archive.tar
 
 # List with detailed information
-zarc list archive.tar.gz -l
+zarc list archive.tar -l
 
 # Test archive integrity
-zarc test archive.tar.gz
+zarc test archive.tar
 
 # Show help
 zarc help
@@ -77,42 +77,42 @@ zarc extract --help
 
 ```bash
 # Basic extraction
-zarc extract archive.tar.gz
+zarc extract archive.tar
 
 # Extract with verbose output
-zarc extract archive.tar.gz -v
+zarc extract archive.tar -v
 
 # Extract specific files
-zarc extract archive.tar.gz --include "*.txt"
+zarc extract archive.tar --include "*.txt"
 
 # Extract excluding certain files
-zarc extract archive.tar.gz --exclude "*.log"
+zarc extract archive.tar --exclude "*.log"
 
 # Overwrite existing files
-zarc extract archive.tar.gz -f
+zarc extract archive.tar -f
 ```
 
 #### Listing Archive Contents
 
 ```bash
 # Simple list
-zarc list archive.tar.gz
+zarc list archive.tar
 
 # Detailed listing with permissions and timestamps
-zarc list archive.tar.gz -l
+zarc list archive.tar -l
 
 # Human-readable file sizes
-zarc list archive.tar.gz -lh
+zarc list archive.tar -lh
 ```
 
 #### Testing Archives
 
 ```bash
 # Verify archive integrity
-zarc test archive.tar.gz
+zarc test archive.tar
 
 # Verbose output showing each entry
-zarc test archive.tar.gz -v
+zarc test archive.tar -v
 ```
 
 ### Available Commands
@@ -128,9 +128,8 @@ zarc test archive.tar.gz -v
 ### Supported Formats (v0.1.0)
 
 - tar (uncompressed)
-- tar.gz / tgz (gzip compressed)
 
-*Note: Additional formats (zip, 7z, bzip2, xz) are planned for future releases.*
+*Note: Compressed formats (gzip, bzip2, xz) and other archive formats (zip, 7z) are planned for future releases.*
 
 ## Development
 
@@ -154,10 +153,10 @@ zig build -Doptimize=ReleaseSmall
 
 ```bash
 # Run with arguments
-zig build run -- extract archive.tar.gz
+zig build run -- extract archive.tar
 
 # Or run the binary directly
-./zig-out/bin/zarc extract archive.tar.gz
+./zig-out/bin/zarc extract archive.tar
 ```
 
 ### Testing
@@ -238,14 +237,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Project Status
 
-This project is currently in **Phase 0 - Foundation (v0.1.0)**, focusing on core tar.gz functionality and establishing a solid foundation for future development.
+This project is currently in **Phase 0 - Foundation (v0.1.0)**, focusing on core tar functionality and establishing a solid foundation for future development.
 
 ### Roadmap
 
-- **v0.1.0** (Current): tar + gzip support (extract, list, test)
-- **v0.2.0**: zip format support, archive creation (compress)
-- **v0.3.0**: 7z format reading
-- **v0.4.0**: 7z format writing
+- **v0.1.0** (Current): tar support (extract only, uncompressed)
+- **v0.2.0**: gzip compression support (tar.gz), archive creation (compress)
+- **v0.3.0**: zip and bzip2 support
+- **v0.4.0**: 7z and xz support
 - **v1.0.0**: Stable release with C API
 
 For detailed development plans, see the [design documentation](docs/DESIGN_PHILOSOPHY.md).
