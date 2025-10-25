@@ -4,6 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Get zlib dependency
+    const zlib_dep = b.dependency("zlib", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Main executable
     const exe = b.addExecutable(.{
         .name = "zarc",
@@ -15,6 +21,12 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.linkLibC();
+    exe.linkLibrary(zlib_dep.artifact("z")); // Link zlib from dependency
+    exe.addCSourceFile(.{
+        .file = b.path("src/c/zlib_compress.c"),
+        .flags = &.{"-std=c99"},
+    });
+    exe.addIncludePath(b.path("src/c"));
     b.installArtifact(exe);
 
     // Run step
@@ -35,6 +47,13 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    unit_tests.linkLibC();
+    unit_tests.linkLibrary(zlib_dep.artifact("z"));
+    unit_tests.addCSourceFile(.{
+        .file = b.path("src/c/zlib_compress.c"),
+        .flags = &.{"-std=c99"},
+    });
+    unit_tests.addIncludePath(b.path("src/c"));
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
@@ -58,6 +77,13 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    unit_only_tests.linkLibC();
+    unit_only_tests.linkLibrary(zlib_dep.artifact("z"));
+    unit_only_tests.addCSourceFile(.{
+        .file = b.path("src/c/zlib_compress.c"),
+        .flags = &.{"-std=c99"},
+    });
+    unit_only_tests.addIncludePath(b.path("src/c"));
 
     const run_unit_only_tests = b.addRunArtifact(unit_only_tests);
     run_unit_only_tests.setCwd(b.path(".")); // Set working directory to project root
@@ -65,7 +91,6 @@ pub fn build(b: *std.Build) void {
     unit_only_step.dependOn(&run_unit_only_tests.step);
 
     // Integration tests (tests/integration directory)
-
     const integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/integration/main.zig"),
@@ -76,6 +101,13 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    integration_tests.linkLibC();
+    integration_tests.linkLibrary(zlib_dep.artifact("z"));
+    integration_tests.addCSourceFile(.{
+        .file = b.path("src/c/zlib_compress.c"),
+        .flags = &.{"-std=c99"},
+    });
+    integration_tests.addIncludePath(b.path("src/c"));
 
     const run_integration_tests = b.addRunArtifact(integration_tests);
     run_integration_tests.setCwd(b.path(".")); // Set working directory to project root
@@ -151,6 +183,12 @@ fn addCrossCompileTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) voi
     for (targets) |t| {
         const resolved_target = b.resolveTargetQuery(t.query);
 
+        // Get zlib dependency for this target
+        const target_zlib_dep = b.dependency("zlib", .{
+            .target = resolved_target,
+            .optimize = optimize,
+        });
+
         const exe = b.addExecutable(.{
             .name = b.fmt("zarc-{s}", .{t.name}),
             .root_module = b.createModule(.{
@@ -161,6 +199,12 @@ fn addCrossCompileTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) voi
         });
 
         exe.linkLibC();
+        exe.linkLibrary(target_zlib_dep.artifact("z"));
+        exe.addCSourceFile(.{
+            .file = b.path("src/c/zlib_compress.c"),
+            .flags = &.{"-std=c99"},
+        });
+        exe.addIncludePath(b.path("src/c"));
 
         const install = b.addInstallArtifact(exe, .{});
 

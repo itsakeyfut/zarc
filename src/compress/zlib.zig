@@ -1,0 +1,218 @@
+const std = @import("std");
+const gzip = @import("gzip.zig");
+
+/// Compression format
+pub const Format = enum(c_int) {
+    gzip = 0,
+    zlib = 1,
+};
+
+/// Re-export gzip header types
+pub const GzipHeader = gzip.Header;
+pub const GzipFooter = gzip.Footer;
+pub const GzipFlags = gzip.Flags;
+pub const GzipOs = gzip.Os;
+
+/// C compression result structure
+const CCompressResult = extern struct {
+    data: ?[*]u8,
+    size: usize,
+    error_code: c_int,
+};
+
+/// External C function for compression
+extern "c" fn zlib_compress(format: Format, src: [*]const u8, src_len: usize) CCompressResult;
+
+/// Compress data using zlib (via C implementation)
+pub fn compress(allocator: std.mem.Allocator, format: Format, data: []const u8) ![]u8 {
+    // Call C compression function
+    const result = zlib_compress(format, data.ptr, data.len);
+
+    // Check for errors
+    if (result.error_code != 0) {
+        // Free C-allocated memory if any
+        if (result.data) |ptr| {
+            std.c.free(ptr);
+        }
+        return error.CompressionFailed;
+    }
+
+    // Ensure we got data back
+    const c_data = result.data orelse return error.CompressionFailed;
+    if (result.size == 0) {
+        std.c.free(c_data);
+        return error.CompressionFailed;
+    }
+
+    // Copy C-allocated data to Zig-managed memory
+    const compressed = try allocator.alloc(u8, result.size);
+    errdefer allocator.free(compressed);
+
+    @memcpy(compressed, c_data[0..result.size]);
+
+    // Free C-allocated memory
+    std.c.free(c_data);
+
+    return compressed;
+}
+
+/// Decompress data using Zig's standard library
+pub fn decompress(allocator: std.mem.Allocator, format: Format, compressed_data: []const u8) ![]u8 {
+    const flate = std.compress.flate;
+
+    // Convert Format to flate.Container
+    const container: flate.Container = switch (format) {
+        .gzip => .gzip,
+        .zlib => .zlib,
+    };
+
+    // Create reader from compressed data
+    var in_stream = std.io.fixedBufferStream(compressed_data);
+    const in_reader = in_stream.reader();
+
+    // Create output buffer
+    var out = std.array_list.AlignedManaged(u8, null).init(allocator);
+    defer out.deinit();
+
+    // Decompress
+    var decompressor: flate.Decompress = .init(in_reader, container, &.{});
+    _ = try decompressor.reader().streamRemaining(out.writer());
+
+    // Return the decompressed data
+    return try allocator.dupe(u8, out.items);
+}
+
+/// Result of gzip decompression with header information
+pub const GzipDecompressResult = struct {
+    /// Decompressed data
+    data: []u8,
+    /// Gzip header information
+    header: GzipHeader,
+    /// Gzip footer information
+    footer: GzipFooter,
+
+    pub fn deinit(self: *GzipDecompressResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.data);
+        self.header.deinit(allocator);
+    }
+};
+
+/// Decompress gzip data and extract header/footer information
+pub fn decompressGzipWithInfo(allocator: std.mem.Allocator, compressed_data: []const u8) !GzipDecompressResult {
+    const flate = std.compress.flate;
+
+    var stream = std.io.fixedBufferStream(compressed_data);
+    const reader = stream.reader();
+
+    // Parse gzip header
+    var header = try GzipHeader.parse(allocator, reader);
+    errdefer header.deinit(allocator);
+
+    // Decompress the deflate stream
+    var out = std.array_list.AlignedManaged(u8, null).init(allocator);
+    defer out.deinit();
+
+    // Reset to start and use flate decompressor (it will handle the header again)
+    stream.reset();
+    var in_stream = std.io.fixedBufferStream(compressed_data);
+    var decompressor: flate.Decompress = .init(in_stream.reader(), .gzip, &.{});
+    _ = try decompressor.reader().streamRemaining(out.writer());
+
+    const decompressed = try allocator.dupe(u8, out.items);
+    errdefer allocator.free(decompressed);
+
+    // Parse footer (last 8 bytes)
+    if (compressed_data.len < 8) {
+        return error.InvalidGzipFooter;
+    }
+
+    var footer_stream = std.io.fixedBufferStream(compressed_data[compressed_data.len - 8 ..]);
+    const footer = try GzipFooter.parse(footer_stream.reader());
+
+    return GzipDecompressResult{
+        .data = decompressed,
+        .header = header,
+        .footer = footer,
+    };
+}
+
+/// Read only the gzip header without decompressing
+pub fn readGzipHeader(allocator: std.mem.Allocator, compressed_data: []const u8) !GzipHeader {
+    var stream = std.io.fixedBufferStream(compressed_data);
+    return try GzipHeader.parse(allocator, stream.reader());
+}
+
+test "compress and decompress gzip" {
+    const allocator = std.testing.allocator;
+    const original = "Hello, World! This is a test of compression.";
+
+    // Compress
+    const compressed = try compress(allocator, .gzip, original);
+    defer allocator.free(compressed);
+
+    std.debug.print("Original size: {d}, Compressed size: {d}\n", .{ original.len, compressed.len });
+
+    // Decompress
+    const decompressed = try decompress(allocator, .gzip, compressed);
+    defer allocator.free(decompressed);
+
+    // Verify
+    try std.testing.expectEqualStrings(original, decompressed);
+}
+
+test "compress and decompress zlib" {
+    const allocator = std.testing.allocator;
+    const original = "Hello, World! This is a test of zlib compression.";
+
+    // Compress
+    const compressed = try compress(allocator, .zlib, original);
+    defer allocator.free(compressed);
+
+    std.debug.print("Original size: {d}, Compressed size: {d}\n", .{ original.len, compressed.len });
+
+    // Decompress
+    const decompressed = try decompress(allocator, .zlib, compressed);
+    defer allocator.free(decompressed);
+
+    // Verify
+    try std.testing.expectEqualStrings(original, decompressed);
+}
+
+test "decompress gzip with header info" {
+    const allocator = std.testing.allocator;
+    const original = "Test data for gzip header extraction";
+
+    // Compress first
+    const compressed = try compress(allocator, .gzip, original);
+    defer allocator.free(compressed);
+
+    // Decompress with header info
+    var result = try decompressGzipWithInfo(allocator, compressed);
+    defer result.deinit(allocator);
+
+    // Verify decompressed data
+    try std.testing.expectEqualStrings(original, result.data);
+
+    // Verify header
+    try std.testing.expectEqual(@as(u8, 8), result.header.compression_method);
+
+    // Verify footer CRC and size
+    try std.testing.expectEqual(@as(u32, @truncate(result.data.len)), result.footer.isize);
+}
+
+test "read gzip header only" {
+    const allocator = std.testing.allocator;
+    const original = "Sample data";
+
+    // Compress
+    const compressed = try compress(allocator, .gzip, original);
+    defer allocator.free(compressed);
+
+    // Read header only
+    var header = try readGzipHeader(allocator, compressed);
+    defer header.deinit(allocator);
+
+    // Verify header
+    try std.testing.expectEqual(@as(u8, 8), header.compression_method);
+    try std.testing.expect(!std.mem.eql(u8, &gzip.magic_number, &[_]u8{ 0, 0 }));
+}
