@@ -15,6 +15,12 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.linkLibC();
+    exe.linkSystemLibrary("z"); // Link zlib
+    exe.addCSourceFile(.{
+        .file = b.path("src/c/zlib_compress.c"),
+        .flags = &.{"-std=c99"},
+    });
+    exe.addIncludePath(b.path("src/c"));
     b.installArtifact(exe);
 
     // Run step
@@ -35,6 +41,13 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    unit_tests.linkLibC();
+    unit_tests.linkSystemLibrary("z");
+    unit_tests.addCSourceFile(.{
+        .file = b.path("src/c/zlib_compress.c"),
+        .flags = &.{"-std=c99"},
+    });
+    unit_tests.addIncludePath(b.path("src/c"));
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
@@ -58,6 +71,13 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    unit_only_tests.linkLibC();
+    unit_only_tests.linkSystemLibrary("z");
+    unit_only_tests.addCSourceFile(.{
+        .file = b.path("src/c/zlib_compress.c"),
+        .flags = &.{"-std=c99"},
+    });
+    unit_only_tests.addIncludePath(b.path("src/c"));
 
     const run_unit_only_tests = b.addRunArtifact(unit_only_tests);
     run_unit_only_tests.setCwd(b.path(".")); // Set working directory to project root
@@ -65,7 +85,6 @@ pub fn build(b: *std.Build) void {
     unit_only_step.dependOn(&run_unit_only_tests.step);
 
     // Integration tests (tests/integration directory)
-
     const integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/integration/main.zig"),
@@ -76,6 +95,13 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    integration_tests.linkLibC();
+    integration_tests.linkSystemLibrary("z");
+    integration_tests.addCSourceFile(.{
+        .file = b.path("src/c/zlib_compress.c"),
+        .flags = &.{"-std=c99"},
+    });
+    integration_tests.addIncludePath(b.path("src/c"));
 
     const run_integration_tests = b.addRunArtifact(integration_tests);
     run_integration_tests.setCwd(b.path(".")); // Set working directory to project root
@@ -161,6 +187,12 @@ fn addCrossCompileTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) voi
         });
 
         exe.linkLibC();
+        exe.linkSystemLibrary("z");
+        exe.addCSourceFile(.{
+            .file = b.path("src/c/zlib_compress.c"),
+            .flags = &.{"-std=c99"},
+        });
+        exe.addIncludePath(b.path("src/c"));
 
         const install = b.addInstallArtifact(exe, .{});
 

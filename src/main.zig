@@ -23,6 +23,12 @@ pub const io = struct {
     pub const filesystem = @import("io/filesystem.zig");
 };
 
+// Compression modules
+pub const compress = struct {
+    pub const zlib = @import("compress/zlib.zig");
+    pub const gzip = @import("compress/gzip.zig");
+};
+
 // Application modules
 pub const app = struct {
     pub const security = @import("app/security.zig");
