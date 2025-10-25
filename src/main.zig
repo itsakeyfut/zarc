@@ -27,6 +27,9 @@ pub const io = struct {
 pub const compress = struct {
     pub const zlib = @import("compress/zlib.zig");
     pub const gzip = @import("compress/gzip.zig");
+    pub const deflate = struct {
+        pub const decode = @import("compress/deflate/decode.zig");
+    };
 };
 
 // Application modules
@@ -134,6 +137,9 @@ test {
     _ = io.reader;
     _ = io.writer;
     _ = io.filesystem;
+    _ = compress.zlib;
+    _ = compress.gzip;
+    _ = compress.deflate.decode;
     _ = app.security;
     _ = app.extract;
     _ = platform.common;

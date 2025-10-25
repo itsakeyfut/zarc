@@ -56,7 +56,7 @@ pub fn compress(allocator: std.mem.Allocator, format: Format, data: []const u8) 
     return compressed;
 }
 
-/// Decompress data using Zig's standard library
+/// Decompress data using Zig's standard library (Pure Zig implementation)
 pub fn decompress(allocator: std.mem.Allocator, format: Format, compressed_data: []const u8) ![]u8 {
     const flate = std.compress.flate;
 
@@ -66,20 +66,23 @@ pub fn decompress(allocator: std.mem.Allocator, format: Format, compressed_data:
         .zlib => .zlib,
     };
 
-    // Create reader from compressed data
-    var in_stream = std.io.fixedBufferStream(compressed_data);
-    const in_reader = in_stream.reader();
+    // Create Reader using std.Io.Reader.fixed()
+    var in: std.Io.Reader = .fixed(compressed_data);
 
     // Create output buffer
     var out = std.array_list.AlignedManaged(u8, null).init(allocator);
     defer out.deinit();
 
+    // Create output writer
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+
     // Decompress
-    var decompressor: flate.Decompress = .init(in_reader, container, &.{});
-    _ = try decompressor.reader().streamRemaining(out.writer());
+    var decompressor: flate.Decompress = .init(&in, container, &.{});
+    _ = try decompressor.reader.streamRemaining(&aw.writer);
 
     // Return the decompressed data
-    return try allocator.dupe(u8, out.items);
+    return try allocator.dupe(u8, aw.written());
 }
 
 /// Result of gzip decompression with header information
@@ -99,8 +102,6 @@ pub const GzipDecompressResult = struct {
 
 /// Decompress gzip data and extract header/footer information
 pub fn decompressGzipWithInfo(allocator: std.mem.Allocator, compressed_data: []const u8) !GzipDecompressResult {
-    const flate = std.compress.flate;
-
     var stream = std.io.fixedBufferStream(compressed_data);
     const reader = stream.reader();
 
@@ -108,17 +109,8 @@ pub fn decompressGzipWithInfo(allocator: std.mem.Allocator, compressed_data: []c
     var header = try GzipHeader.parse(allocator, reader);
     errdefer header.deinit(allocator);
 
-    // Decompress the deflate stream
-    var out = std.array_list.AlignedManaged(u8, null).init(allocator);
-    defer out.deinit();
-
-    // Reset to start and use flate decompressor (it will handle the header again)
-    stream.reset();
-    var in_stream = std.io.fixedBufferStream(compressed_data);
-    var decompressor: flate.Decompress = .init(in_stream.reader(), .gzip, &.{});
-    _ = try decompressor.reader().streamRemaining(out.writer());
-
-    const decompressed = try allocator.dupe(u8, out.items);
+    // Decompress using the standard decompress function
+    const decompressed = try decompress(allocator, .gzip, compressed_data);
     errdefer allocator.free(decompressed);
 
     // Parse footer (last 8 bytes)
