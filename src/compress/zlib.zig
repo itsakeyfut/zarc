@@ -66,19 +66,20 @@ pub fn decompress(allocator: std.mem.Allocator, format: Format, compressed_data:
         .zlib => .zlib,
     };
 
-    // Create reader
-    var in_reader: std.Io.Reader = .fixed(compressed_data);
+    // Create reader from compressed data
+    var in_stream = std.io.fixedBufferStream(compressed_data);
+    const in_reader = in_stream.reader();
 
-    // Create allocating writer
-    var out: std.Io.Writer.Allocating = .init(allocator);
+    // Create output buffer
+    var out = std.array_list.AlignedManaged(u8, null).init(allocator);
     defer out.deinit();
 
     // Decompress
-    var decompressor: flate.Decompress = .init(&in_reader, container, &.{});
-    _ = try decompressor.reader.streamRemaining(&out.writer);
+    var decompressor: flate.Decompress = .init(in_reader, container, &.{});
+    _ = try decompressor.reader().streamRemaining(out.writer());
 
     // Return the decompressed data
-    return try allocator.dupe(u8, out.written());
+    return try allocator.dupe(u8, out.items);
 }
 
 /// Result of gzip decompression with header information
@@ -108,16 +109,16 @@ pub fn decompressGzipWithInfo(allocator: std.mem.Allocator, compressed_data: []c
     errdefer header.deinit(allocator);
 
     // Decompress the deflate stream
-    var out: std.Io.Writer.Allocating = .init(allocator);
+    var out = std.array_list.AlignedManaged(u8, null).init(allocator);
     defer out.deinit();
 
     // Reset to start and use flate decompressor (it will handle the header again)
     stream.reset();
-    var in_reader: std.Io.Reader = .fixed(compressed_data);
-    var decompressor: flate.Decompress = .init(&in_reader, .gzip, &.{});
-    _ = try decompressor.reader.streamRemaining(&out.writer);
+    var in_stream = std.io.fixedBufferStream(compressed_data);
+    var decompressor: flate.Decompress = .init(in_stream.reader(), .gzip, &.{});
+    _ = try decompressor.reader().streamRemaining(out.writer());
 
-    const decompressed = try allocator.dupe(u8, out.written());
+    const decompressed = try allocator.dupe(u8, out.items);
     errdefer allocator.free(decompressed);
 
     // Parse footer (last 8 bytes)

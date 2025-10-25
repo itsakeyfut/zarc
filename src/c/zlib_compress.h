@@ -1,6 +1,10 @@
 #ifndef ZLIB_COMPRESS_H
 #define ZLIB_COMPRESS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -24,5 +28,12 @@ typedef struct {
 // Returns CompressResult with compressed data or error
 // Caller is responsible for freeing result.data using free()
 CompressResult zlib_compress(CompressFormat format, const uint8_t *src, size_t src_len);
+
+// Free a buffer allocated by this library (FFI-safe).
+void zlib_free(void *ptr);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 #endif // ZLIB_COMPRESS_H

@@ -32,7 +32,8 @@ CompressResult zlib_compress(CompressFormat format, const uint8_t *src, size_t s
     stream.next_in = (Bytef *)actual_src;
     stream.avail_in = src_len;
     stream.next_out = dest;
-    stream.avail_out = max_size;
+    // zlib uses uInt for avail_out; bound to 32-bit.
+    stream.avail_out = (uInt)((max_size > 0xFFFFFFFFu) ? 0xFFFFFFFFu : (uInt)max_size);
 
     // Initialize deflate
     // windowBits: 15 for zlib, 15+16 for gzip
@@ -46,10 +47,31 @@ CompressResult zlib_compress(CompressFormat format, const uint8_t *src, size_t s
         return result;
     }
 
-    // Compress
-    ret = deflate(&stream, Z_FINISH);
-
-    if (ret != Z_STREAM_END) {
+    // Compress with growth to handle large outputs
+    size_t cap = max_size;
+    for (;;) {
+        ret = deflate(&stream, Z_FINISH);
+        if (ret == Z_STREAM_END) break;
+        if (ret == Z_OK || ret == Z_BUF_ERROR) {
+            // Grow output buffer and continue
+            const size_t used = (size_t)stream.total_out;
+            size_t new_cap = cap * 2;
+            if (new_cap < used + 1) new_cap = used + 1;
+            uint8_t *new_dest = (uint8_t *)realloc(dest, new_cap);
+            if (!new_dest) {
+                deflateEnd(&stream);
+                free(dest);
+                result.error = -2; // OOM
+                return result;
+            }
+            dest = new_dest;
+            cap = new_cap;
+            stream.next_out = (Bytef *)(dest + used);
+            size_t remaining = cap - used;
+            stream.avail_out = (uInt)((remaining > 0xFFFFFFFFu) ? 0xFFFFFFFFu : (uInt)remaining);
+            continue;
+        }
+        // Hard failure
         deflateEnd(&stream);
         free(dest);
         result.error = ret;
@@ -73,4 +95,8 @@ CompressResult zlib_compress(CompressFormat format, const uint8_t *src, size_t s
     result.error = 0;
 
     return result;
+}
+
+void zlib_free(void *ptr) {
+    free(ptr);
 }

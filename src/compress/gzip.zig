@@ -201,6 +201,9 @@ pub const Header = struct {
 
         if (self.flags.fextra) {
             if (self.extra) |extra| {
+                if (extra.len > std.math.maxInt(u16)) {
+                    return error.ExtraFieldTooLarge;
+                }
                 try writer.writeInt(u16, @intCast(extra.len), .little);
                 try writer.writeAll(extra);
             } else {
@@ -342,7 +345,10 @@ test "invalid magic number" {
 
     const bad_header = [_]u8{
         0x00, 0x00, // Wrong magic number
-        0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+        0x08, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x03,
     };
 
     var stream = std.io.fixedBufferStream(&bad_header);
