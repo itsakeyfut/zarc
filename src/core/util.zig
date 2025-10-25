@@ -175,8 +175,8 @@ pub fn sanitizePath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 
         return error.PathTraversalAttempt;
     }
 
-    var components = std.array_list.AlignedManaged([]const u8, null).init(allocator);
-    defer components.deinit();
+    var components = std.array_list.Aligned([]const u8, null).empty;
+    defer components.deinit(allocator);
 
     var it = std.mem.splitScalar(u8, path, '/');
     while (it.next()) |component| {
@@ -187,7 +187,7 @@ pub fn sanitizePath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 
                 _ = components.pop();
             }
         } else {
-            try components.append(component);
+            try components.append(allocator, component);
         }
     }
 
