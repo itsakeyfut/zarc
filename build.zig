@@ -4,6 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Get zlib dependency
+    const zlib_dep = b.dependency("zlib", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Main executable
     const exe = b.addExecutable(.{
         .name = "zarc",
@@ -15,7 +21,7 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.linkLibC();
-    exe.linkSystemLibrary("z"); // Link zlib
+    exe.linkLibrary(zlib_dep.artifact("z")); // Link zlib from dependency
     exe.addCSourceFile(.{
         .file = b.path("src/c/zlib_compress.c"),
         .flags = &.{"-std=c99"},
@@ -42,7 +48,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     unit_tests.linkLibC();
-    unit_tests.linkSystemLibrary("z");
+    unit_tests.linkLibrary(zlib_dep.artifact("z"));
     unit_tests.addCSourceFile(.{
         .file = b.path("src/c/zlib_compress.c"),
         .flags = &.{"-std=c99"},
@@ -72,7 +78,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     unit_only_tests.linkLibC();
-    unit_only_tests.linkSystemLibrary("z");
+    unit_only_tests.linkLibrary(zlib_dep.artifact("z"));
     unit_only_tests.addCSourceFile(.{
         .file = b.path("src/c/zlib_compress.c"),
         .flags = &.{"-std=c99"},
@@ -96,7 +102,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     integration_tests.linkLibC();
-    integration_tests.linkSystemLibrary("z");
+    integration_tests.linkLibrary(zlib_dep.artifact("z"));
     integration_tests.addCSourceFile(.{
         .file = b.path("src/c/zlib_compress.c"),
         .flags = &.{"-std=c99"},
@@ -177,6 +183,12 @@ fn addCrossCompileTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) voi
     for (targets) |t| {
         const resolved_target = b.resolveTargetQuery(t.query);
 
+        // Get zlib dependency for this target
+        const target_zlib_dep = b.dependency("zlib", .{
+            .target = resolved_target,
+            .optimize = optimize,
+        });
+
         const exe = b.addExecutable(.{
             .name = b.fmt("zarc-{s}", .{t.name}),
             .root_module = b.createModule(.{
@@ -187,7 +199,7 @@ fn addCrossCompileTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) voi
         });
 
         exe.linkLibC();
-        exe.linkSystemLibrary("z");
+        exe.linkLibrary(target_zlib_dep.artifact("z"));
         exe.addCSourceFile(.{
             .file = b.path("src/c/zlib_compress.c"),
             .flags = &.{"-std=c99"},
