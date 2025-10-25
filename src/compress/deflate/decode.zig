@@ -24,11 +24,12 @@ pub const Container = enum {
     gzip,
 
     /// Convert to zlib.Format
-    fn toZlibFormat(self: Container) zlib_mod.Format {
+    /// Returns error.UnsupportedContainer for raw deflate (not implemented in Phase 1)
+    fn toZlibFormat(self: Container) !zlib_mod.Format {
         return switch (self) {
             .gzip => .gzip,
             .zlib => .zlib,
-            .raw => .zlib, // Phase 1: treat raw as zlib
+            .raw => error.UnsupportedContainer,
         };
     }
 };
@@ -87,12 +88,13 @@ pub const DeflateDecoder = struct {
     ///   - Caller owns the returned memory and must free it
     ///
     /// Errors:
-    ///   - error.InvalidDeflateData: Corrupted or invalid deflate stream
+    ///   - error.UnsupportedContainer: Raw deflate is not supported in Phase 1
+    ///   - error.CompressionFailed: Corrupted or invalid compressed stream
     ///   - error.OutOfMemory: Memory allocation failed
     ///
     /// Note: Phase 1 implementation uses zlib library for decompression
     pub fn decompress(self: DeflateDecoder, compressed: []const u8) ![]u8 {
-        const format = self.container.toZlibFormat();
+        const format = try self.container.toZlibFormat();
         return zlib_mod.decompress(self.allocator, format, compressed);
     }
 
@@ -106,25 +108,27 @@ pub const DeflateDecoder = struct {
     /// Returns:
     ///   - Allocated slice containing decompressed data
     ///   - Caller owns the returned memory and must free it
+    ///
+    /// Note: Reads up to 512 MiB from the reader by default
     pub fn decompressReader(self: DeflateDecoder, reader: anytype) ![]u8 {
-        // Read all data from reader first
-        var data = std.array_list.AlignedManaged(u8, null).init(self.allocator);
-        defer data.deinit();
-
-        try reader.readAllArrayList(&data, std.math.maxInt(usize));
+        // Read all data from reader first (with reasonable size cap)
+        const max_size = 512 * 1024 * 1024; // 512 MiB
+        const buf = try reader.readAllAlloc(self.allocator, max_size);
+        defer self.allocator.free(buf);
 
         // Then decompress
-        return self.decompress(data.items);
+        return self.decompress(buf);
     }
 };
 
 /// Convenience function: decompress raw deflate data
 ///
-/// Note: Phase 1 implementation treats raw deflate as zlib format
+/// Note: Raw deflate is not supported in Phase 1
 /// Phase 2+ will handle true raw deflate streams
 pub fn decompressRaw(allocator: std.mem.Allocator, compressed: []const u8) ![]u8 {
-    const decoder = DeflateDecoder.init(allocator, .raw);
-    return decoder.decompress(compressed);
+    _ = allocator;
+    _ = compressed;
+    return error.UnsupportedContainer;
 }
 
 /// Convenience function: decompress zlib data
