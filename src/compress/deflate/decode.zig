@@ -10,7 +10,6 @@ const std = @import("std");
 /// Implementation note:
 /// Phase 1: Uses Zig's standard library via zlib wrapper (C library)
 /// Phase 2+: Will be replaced with pure Zig implementation for full control
-
 /// Import the zlib module for decompression
 const zlib_mod = @import("../zlib.zig");
 
