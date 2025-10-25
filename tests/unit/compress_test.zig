@@ -172,7 +172,10 @@ test "gzip header: invalid magic number" {
 
     const bad_data = [_]u8{
         0x00, 0x00, // Wrong magic
-        0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+        0x08, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x03,
     };
 
     var stream = std.io.fixedBufferStream(&bad_data);
@@ -187,7 +190,13 @@ test "gzip header: unsupported compression method" {
     const bad_data = [_]u8{
         0x1f, 0x8b, // Correct magic
         0x07, // Wrong compression method (not deflate)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x03,
     };
 
     var stream = std.io.fixedBufferStream(&bad_data);
