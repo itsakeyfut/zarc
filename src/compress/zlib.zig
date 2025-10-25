@@ -70,8 +70,8 @@ pub fn decompress(allocator: std.mem.Allocator, format: Format, compressed_data:
     var in: std.Io.Reader = .fixed(compressed_data);
 
     // Create output buffer
-    var out = std.array_list.AlignedManaged(u8, null).init(allocator);
-    defer out.deinit();
+    var out = std.array_list.Aligned(u8, null).empty;
+    defer out.deinit(allocator);
 
     // Create output writer
     var aw: std.Io.Writer.Allocating = .init(allocator);

@@ -440,8 +440,8 @@ pub fn normalizePath(
     allocator: std.mem.Allocator,
     path: []const u8,
 ) ![]u8 {
-    var components = std.array_list.AlignedManaged([]const u8, null).init(allocator);
-    defer components.deinit();
+    var components = std.array_list.Aligned([]const u8, null).empty;
+    defer components.deinit(allocator);
 
     const was_abs = std.fs.path.isAbsolute(path);
     var it = std.mem.tokenizeAny(u8, path, "/\\");
@@ -453,7 +453,7 @@ pub fn normalizePath(
                 _ = components.pop();
             }
         } else {
-            try components.append(component);
+            try components.append(allocator, component);
         }
     }
 

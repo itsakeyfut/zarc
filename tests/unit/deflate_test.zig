@@ -36,12 +36,12 @@ test "deflate: dynamic Huffman block decompression" {
     const allocator = std.testing.allocator;
 
     // Create larger data to encourage dynamic Huffman encoding
-    var original = std.array_list.AlignedManaged(u8, null).init(allocator);
-    defer original.deinit();
+    var original = std.array_list.Aligned(u8, null).empty;
+    defer original.deinit(allocator);
 
     const sentence = "The quick brown fox jumps over the lazy dog. ";
     for (0..50) |_| {
-        try original.appendSlice(sentence);
+        try original.appendSlice(allocator, sentence);
     }
 
     const compressed = try zlib.compress(allocator, .gzip, original.items);
@@ -78,18 +78,18 @@ test "deflate: LZ77 long distance back-reference" {
     const allocator = std.testing.allocator;
 
     // Create data with far-apart repetitions (long distance)
-    var original = std.array_list.AlignedManaged(u8, null).init(allocator);
-    defer original.deinit();
+    var original = std.array_list.Aligned(u8, null).empty;
+    defer original.deinit(allocator);
 
     const pattern = "pattern123";
     // Add pattern at the start
-    try original.appendSlice(pattern);
+    try original.appendSlice(allocator, pattern);
     // Add filler data
     for (0..1000) |i| {
-        try original.append(@truncate(i));
+        try original.append(allocator, @truncate(i));
     }
     // Repeat pattern (should create a long-distance back-reference)
-    try original.appendSlice(pattern);
+    try original.appendSlice(allocator, pattern);
 
     const compressed = try zlib.compress(allocator, .gzip, original.items);
     defer allocator.free(compressed);
@@ -106,11 +106,11 @@ test "deflate: LZ77 maximum length match" {
 
     // Create very long repetitive sequence
     const pattern = "0123456789";
-    var original = std.array_list.AlignedManaged(u8, null).init(allocator);
-    defer original.deinit();
+    var original = std.array_list.Aligned(u8, null).empty;
+    defer original.deinit(allocator);
 
     for (0..300) |_| {
-        try original.appendSlice(pattern);
+        try original.appendSlice(allocator, pattern);
     }
 
     const compressed = try zlib.compress(allocator, .gzip, original.items);
@@ -306,14 +306,14 @@ test "deflate: multiple blocks in stream" {
     const allocator = std.testing.allocator;
 
     // Create large enough data to potentially span multiple deflate blocks
-    var original = std.array_list.AlignedManaged(u8, null).init(allocator);
-    defer original.deinit();
+    var original = std.array_list.Aligned(u8, null).empty;
+    defer original.deinit(allocator);
 
     // Add diverse data that might create different block types
     for (0..100) |_| {
-        try original.appendSlice("Repeated text for compression. ");
-        try original.appendSlice("AAAAAABBBBBBCCCCCCDDDDDD");
-        try original.appendSlice("Random text with various characters: !@#$%^&*()");
+        try original.appendSlice(allocator, "Repeated text for compression. ");
+        try original.appendSlice(allocator, "AAAAAABBBBBBCCCCCCDDDDDD");
+        try original.appendSlice(allocator, "Random text with various characters: !@#$%^&*()");
     }
 
     const compressed = try zlib.compress(allocator, .gzip, original.items);

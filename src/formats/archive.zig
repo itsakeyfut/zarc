@@ -40,7 +40,7 @@ const errors = @import("../core/errors.zig");
 /// }
 ///
 /// // Retaining entries (requires deep cloning)
-/// var entries = std.array_list.AlignedManaged(types.Entry, null).init(allocator);
+/// var entries = std.array_list.Aligned(types.Entry, null).empty;
 /// defer {
 ///     for (entries.items) |entry| {
 ///         allocator.free(entry.path);
@@ -48,7 +48,7 @@ const errors = @import("../core/errors.zig");
 ///         allocator.free(entry.gname);
 ///         allocator.free(entry.link_target);
 ///     }
-///     entries.deinit();
+///     entries.deinit(allocator);
 /// }
 ///
 /// while (try archive.next()) |entry| {
@@ -395,19 +395,19 @@ pub fn readAllEntries(
     allocator: std.mem.Allocator,
     archive: *ArchiveReader,
 ) ![]types.Entry {
-    var entries = std.array_list.AlignedManaged(types.Entry, null).init(allocator);
+    var entries = std.array_list.Aligned(types.Entry, null).empty;
     errdefer {
         for (entries.items) |e| freeEntry(allocator, e);
-        entries.deinit();
+        entries.deinit(allocator);
     }
 
     while (try archive.next()) |entry| {
         const owned = try cloneEntry(allocator, entry);
         errdefer freeEntry(allocator, owned);
-        try entries.append(owned);
+        try entries.append(allocator, owned);
     }
 
-    return entries.toOwnedSlice();
+    return entries.toOwnedSlice(allocator);
 }
 
 /// Validate that a path is relative and does not contain directory traversal

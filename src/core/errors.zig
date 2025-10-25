@@ -268,10 +268,10 @@ test "ContextualError: format output" {
         },
     };
 
-    var buffer = std.array_list.AlignedManaged(u8, null).init(std.testing.allocator);
-    defer buffer.deinit();
+    var buffer = std.array_list.Aligned(u8, null).empty;
+    defer buffer.deinit(std.testing.allocator);
 
-    try ctx_err.format("", .{}, buffer.writer());
+    try ctx_err.format("", .{}, buffer.writer(std.testing.allocator));
 
     const output = buffer.items;
     try std.testing.expect(std.mem.indexOf(u8, output, "Error: FileNotFound") != null);
