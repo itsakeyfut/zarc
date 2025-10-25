@@ -20,6 +20,9 @@ test {
     // Compression tests
     _ = @import("compress_test.zig");
 
+    // Deflate decompression tests
+    _ = @import("deflate_test.zig");
+
     // Add more unit test modules here as they are created
     // Example:
     // _ = @import("util_test.zig");
