@@ -26,32 +26,30 @@ const std = @import("std");
 /// This is the standard polynomial used by gzip, zlib, PNG, Ethernet, etc.
 const CRC32_POLYNOMIAL: u32 = 0xEDB88320;
 
-/// CRC-32 lookup table for fast calculation
-/// This table is computed once and used for all subsequent calculations
-var crc32_table: [256]u32 = undefined;
-var table_initialized = false;
-
-/// Initialize the CRC-32 lookup table
-/// This function is called automatically before the first CRC-32 calculation
-fn initializeCrc32Table() void {
-    if (table_initialized) return;
-
+/// CRC-32 lookup table (computed at compile time; thread-safe)
+const crc32_table: [256]u32 = blk: {
+    @setEvalBranchQuota(3000); // 256 entries * 8 iterations + overhead
+    var t: [256]u32 = undefined;
     var n: u32 = 0;
     while (n < 256) : (n += 1) {
         var c: u32 = n;
         var k: u32 = 0;
         while (k < 8) : (k += 1) {
-            if (c & 1 != 0) {
+            if ((c & 1) != 0) {
                 c = CRC32_POLYNOMIAL ^ (c >> 1);
             } else {
                 c = c >> 1;
             }
         }
-        crc32_table[n] = c;
+        t[n] = c;
     }
+    break :blk t;
+};
 
-    table_initialized = true;
-}
+/// Backwards-compat no-op; table is always ready
+fn initializeCrc32Table() void {}
+
+const table_initialized = true;
 
 /// Calculate CRC-32 checksum for the given data
 ///
@@ -70,8 +68,6 @@ fn initializeCrc32Table() void {
 /// const checksum = crc32("Hello, World!");
 /// ```
 pub fn crc32(data: []const u8) u32 {
-    initializeCrc32Table();
-
     var c: u32 = 0xFFFFFFFF; // Initialize to all 1s
 
     for (data) |byte| {
@@ -89,7 +85,6 @@ pub const Crc32 = struct {
 
     /// Initialize a new CRC-32 calculator
     pub fn init() Crc32 {
-        initializeCrc32Table();
         return .{ .value = 0xFFFFFFFF };
     }
 
@@ -227,9 +222,8 @@ test "Crc32: large data" {
     try std.testing.expectEqual(result, incremental_result);
 }
 
-test "crc32: table initialization" {
-    // Verify table is properly initialized
-    initializeCrc32Table();
+test "crc32: table initialization (compile-time)" {
+    // Verify table is always initialized (compile-time)
     try std.testing.expect(table_initialized);
 
     // Verify first few entries match expected values
