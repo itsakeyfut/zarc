@@ -2,7 +2,7 @@
 
 [![Status](https://img.shields.io/badge/status-active--development-brightgreen?style=flat-square)]()
 [![Zig Version](https://img.shields.io/badge/zig-0.15.2+-orange.svg)](https://ziglang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-red.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-red.svg)](https://opensource.org/licenses/Apache-2.0)
 
 A modern, cross-platform archive tool written in Zig. zarc provides a unified interface for working with archive files across different platforms with consistent behavior and strong security guarantees.
 
@@ -222,7 +222,7 @@ This project adheres to a [Code of Conduct](.github/CODE_OF_CONDUCT.md). By part
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
