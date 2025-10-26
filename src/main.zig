@@ -36,6 +36,7 @@ pub const io = struct {
     pub const reader = @import("io/reader.zig");
     pub const writer = @import("io/writer.zig");
     pub const filesystem = @import("io/filesystem.zig");
+    pub const streaming = @import("io/streaming.zig");
 };
 
 // Compression modules
