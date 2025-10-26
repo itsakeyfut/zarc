@@ -84,8 +84,8 @@ pub const GzipReader = struct {
         var header = try gzip.Header.parse(allocator, reader);
         errdefer header.deinit(allocator);
 
-        // Create decompressor using Zig's standard library flate
-        const decompressor = std.compress.flate.decompressor(reader, .gzip, &.{});
+        // Create decompressor for raw deflate stream; header/footer handled manually
+        const decompressor = std.compress.flate.decompressor(reader, .deflate, &.{});
 
         return GzipReader{
             .allocator = allocator,
