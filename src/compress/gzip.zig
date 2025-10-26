@@ -14,6 +14,7 @@
 // limitations under the License.
 
 const std = @import("std");
+const crc32_mod = @import("crc32.zig");
 
 /// Gzip file format constants (RFC 1952)
 pub const magic_number = [2]u8{ 0x1f, 0x8b };
@@ -278,6 +279,21 @@ pub const Footer = struct {
         try writer.writeInt(u32, self.crc32, .little);
         try writer.writeInt(u32, self.isize, .little);
     }
+
+    /// Create footer from uncompressed data
+    pub fn fromData(data: []const u8) Footer {
+        return Footer{
+            .crc32 = crc32_mod.crc32(data),
+            .isize = @truncate(data.len),
+        };
+    }
+
+    /// Validate footer against uncompressed data
+    pub fn validate(self: Footer, data: []const u8) bool {
+        const calculated_crc32 = crc32_mod.crc32(data);
+        const actual_size: u32 = @truncate(data.len);
+        return self.crc32 == calculated_crc32 and self.isize == actual_size;
+    }
 };
 
 test "parse basic gzip header" {
@@ -370,4 +386,84 @@ test "invalid magic number" {
     const result = Header.parse(allocator, stream.reader());
 
     try std.testing.expectError(error.InvalidGzipMagic, result);
+}
+
+test "Footer.fromData: calculate CRC-32 and size" {
+    const test_data = "Hello, World!";
+    const footer = Footer.fromData(test_data);
+
+    // Verify size is correct
+    try std.testing.expectEqual(@as(u32, test_data.len), footer.isize);
+
+    // Verify CRC-32 is non-zero
+    try std.testing.expect(footer.crc32 != 0);
+
+    // Verify deterministic
+    const footer2 = Footer.fromData(test_data);
+    try std.testing.expectEqual(footer.crc32, footer2.crc32);
+    try std.testing.expectEqual(footer.isize, footer2.isize);
+}
+
+test "Footer.validate: correct data" {
+    const test_data = "Test data for CRC-32 validation";
+    const footer = Footer.fromData(test_data);
+
+    // Should validate successfully
+    try std.testing.expect(footer.validate(test_data));
+}
+
+test "Footer.validate: incorrect CRC-32" {
+    const test_data = "Test data";
+    var footer = Footer.fromData(test_data);
+
+    // Corrupt the CRC-32
+    footer.crc32 ^= 0x12345678;
+
+    // Should fail validation
+    try std.testing.expect(!footer.validate(test_data));
+}
+
+test "Footer.validate: incorrect size" {
+    const test_data = "Test data";
+    var footer = Footer.fromData(test_data);
+
+    // Corrupt the size
+    footer.isize += 1;
+
+    // Should fail validation
+    try std.testing.expect(!footer.validate(test_data));
+}
+
+test "Footer.validate: empty data" {
+    const empty_data = "";
+    const footer = Footer.fromData(empty_data);
+
+    try std.testing.expectEqual(@as(u32, 0), footer.isize);
+    try std.testing.expect(footer.validate(empty_data));
+}
+
+test "Footer: write and read with validation" {
+    const allocator = std.testing.allocator;
+    const test_data = "Data to be compressed";
+
+    // Create footer from data
+    const original_footer = Footer.fromData(test_data);
+
+    // Write to buffer
+    var buffer: [8]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buffer);
+    try original_footer.write(stream.writer());
+
+    // Read it back
+    stream.reset();
+    const parsed_footer = try Footer.parse(stream.reader());
+
+    // Verify values match
+    try std.testing.expectEqual(original_footer.crc32, parsed_footer.crc32);
+    try std.testing.expectEqual(original_footer.isize, parsed_footer.isize);
+
+    // Verify validation works
+    try std.testing.expect(parsed_footer.validate(test_data));
+
+    _ = allocator;
 }

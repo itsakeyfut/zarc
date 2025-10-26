@@ -16,6 +16,7 @@
 const std = @import("std");
 const gzip = @import("gzip.zig");
 const c_zlib = @import("../c_compat/zlib.zig");
+const crc32_mod = @import("crc32.zig");
 
 /// Re-export compression format from c_compat layer
 pub const Format = c_zlib.Format;
@@ -96,6 +97,18 @@ pub fn decompressGzipWithInfo(allocator: std.mem.Allocator, compressed_data: []c
 
     var footer_stream = std.io.fixedBufferStream(compressed_data[compressed_data.len - 8 ..]);
     const footer = try GzipFooter.parse(footer_stream.reader());
+
+    // Validate CRC-32
+    const calculated_crc32 = crc32_mod.crc32(decompressed);
+    if (calculated_crc32 != footer.crc32) {
+        return error.ChecksumMismatch;
+    }
+
+    // Validate uncompressed size (modulo 2^32)
+    const actual_size: u32 = @truncate(decompressed.len);
+    if (actual_size != footer.isize) {
+        return error.ChecksumMismatch;
+    }
 
     return GzipDecompressResult{
         .data = decompressed,
@@ -183,4 +196,46 @@ test "read gzip header only" {
     // Verify header
     try std.testing.expectEqual(@as(u8, 8), header.compression_method);
     try std.testing.expect(!std.mem.eql(u8, &gzip.magic_number, &[_]u8{ 0, 0 }));
+}
+
+test "CRC-32 validation: detect corrupted data" {
+    const allocator = std.testing.allocator;
+    const original = "Test data for CRC-32 validation";
+
+    // Compress
+    const compressed = try compress(allocator, .gzip, original);
+    defer allocator.free(compressed);
+
+    // Create a corrupted copy by modifying the footer CRC-32
+    var corrupted = try allocator.dupe(u8, compressed);
+    defer allocator.free(corrupted);
+
+    // Corrupt the CRC-32 in the footer (last 8 bytes, first 4 are CRC-32)
+    const footer_offset = corrupted.len - 8;
+    corrupted[footer_offset] ^= 0xFF; // Flip bits to corrupt CRC-32
+
+    // Try to decompress - should fail with ChecksumMismatch
+    const result = decompressGzipWithInfo(allocator, corrupted);
+    try std.testing.expectError(error.ChecksumMismatch, result);
+}
+
+test "CRC-32 validation: successful validation" {
+    const allocator = std.testing.allocator;
+    const original = "Valid data with correct CRC-32";
+
+    // Compress
+    const compressed = try compress(allocator, .gzip, original);
+    defer allocator.free(compressed);
+
+    // Decompress with validation - should succeed
+    var result = try decompressGzipWithInfo(allocator, compressed);
+    defer result.deinit(allocator);
+
+    // Verify data matches
+    try std.testing.expectEqualStrings(original, result.data);
+
+    // Verify footer values are correct
+    const expected_crc32 = crc32_mod.crc32(original);
+    try std.testing.expectEqual(expected_crc32, result.footer.crc32);
+    try std.testing.expectEqual(@as(u32, @truncate(original.len)), result.footer.isize);
 }
