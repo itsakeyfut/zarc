@@ -153,19 +153,19 @@ pub const FormatType = enum {
         };
     }
 
-    /// Detect format from file extension
+    /// Detect format from file extension (case-insensitive)
     pub fn fromExtension(path: []const u8) FormatType {
-        if (std.mem.endsWith(u8, path, ".tar.gz") or std.mem.endsWith(u8, path, ".tgz")) {
+        if (std.ascii.endsWithIgnoreCase(path, ".tar.gz") or std.ascii.endsWithIgnoreCase(path, ".tgz")) {
             return .tar_gz;
-        } else if (std.mem.endsWith(u8, path, ".tar.bz2") or std.mem.endsWith(u8, path, ".tbz2")) {
+        } else if (std.ascii.endsWithIgnoreCase(path, ".tar.bz2") or std.ascii.endsWithIgnoreCase(path, ".tbz2")) {
             return .tar_bz2;
-        } else if (std.mem.endsWith(u8, path, ".tar.xz") or std.mem.endsWith(u8, path, ".txz")) {
+        } else if (std.ascii.endsWithIgnoreCase(path, ".tar.xz") or std.ascii.endsWithIgnoreCase(path, ".txz")) {
             return .tar_xz;
-        } else if (std.mem.endsWith(u8, path, ".tar")) {
+        } else if (std.ascii.endsWithIgnoreCase(path, ".tar")) {
             return .tar;
-        } else if (std.mem.endsWith(u8, path, ".zip")) {
+        } else if (std.ascii.endsWithIgnoreCase(path, ".zip")) {
             return .zip;
-        } else if (std.mem.endsWith(u8, path, ".7z")) {
+        } else if (std.ascii.endsWithIgnoreCase(path, ".7z")) {
             return .sevenzip;
         } else {
             return .unknown;
@@ -294,6 +294,23 @@ test "FormatType: fromExtension" {
     try std.testing.expectEqual(FormatType.zip, FormatType.fromExtension("archive.zip"));
     try std.testing.expectEqual(FormatType.sevenzip, FormatType.fromExtension("archive.7z"));
     try std.testing.expectEqual(FormatType.unknown, FormatType.fromExtension("unknown.bin"));
+}
+
+test "FormatType: fromExtension case-insensitive" {
+    // Test uppercase extensions
+    try std.testing.expectEqual(FormatType.tar, FormatType.fromExtension("archive.TAR"));
+    try std.testing.expectEqual(FormatType.tar_gz, FormatType.fromExtension("archive.TAR.GZ"));
+    try std.testing.expectEqual(FormatType.tar_gz, FormatType.fromExtension("archive.TGZ"));
+    try std.testing.expectEqual(FormatType.tar_bz2, FormatType.fromExtension("archive.TAR.BZ2"));
+    try std.testing.expectEqual(FormatType.tar_bz2, FormatType.fromExtension("archive.TBZ2"));
+    try std.testing.expectEqual(FormatType.tar_xz, FormatType.fromExtension("archive.TAR.XZ"));
+    try std.testing.expectEqual(FormatType.tar_xz, FormatType.fromExtension("archive.TXZ"));
+    try std.testing.expectEqual(FormatType.zip, FormatType.fromExtension("archive.ZIP"));
+    try std.testing.expectEqual(FormatType.sevenzip, FormatType.fromExtension("archive.7Z"));
+
+    // Test mixed case extensions
+    try std.testing.expectEqual(FormatType.tar_gz, FormatType.fromExtension("archive.Tar.Gz"));
+    try std.testing.expectEqual(FormatType.zip, FormatType.fromExtension("archive.ZiP"));
 }
 
 test "BufferSize: constants" {

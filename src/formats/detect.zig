@@ -15,8 +15,6 @@
 
 const std = @import("std");
 const types = @import("../core/types.zig");
-const errors = @import("../core/errors.zig");
-const gzip = @import("../compress/gzip.zig");
 const tar_header = @import("tar/header.zig");
 
 /// Magic numbers for archive format detection
@@ -158,17 +156,14 @@ pub fn detectFormatFromBytes(data: []const u8) types.FormatType {
 
     // Check gzip magic (most common for tar.gz)
     if (std.mem.eql(u8, data[0..2], &MagicNumbers.GZIP)) {
-        // For gzip, we need to check if it's compressed tar
-        // This is a heuristic: if the file extension suggests tar.gz, trust it
-        // Otherwise, just return gzip format
-        // Note: Proper tar.gz detection would require decompressing and checking,
-        // which is expensive. We'll rely on extension detection for tar_gz.
-        return .tar_gz;
+        // Ambiguous: could be .gz or .tar.gz; defer to extension.
+        return .unknown;
     }
 
     // Check bzip2 magic
     if (std.mem.eql(u8, data[0..2], &MagicNumbers.BZIP2)) {
-        return .tar_bz2;
+        // Ambiguous: could be .bz2 or .tar.bz2; defer to extension.
+        return .unknown;
     }
 
     // Check for ZIP format (needs 4 bytes)
@@ -188,7 +183,8 @@ pub fn detectFormatFromBytes(data: []const u8) types.FormatType {
 
         // Check for XZ format
         if (std.mem.eql(u8, data[0..6], &MagicNumbers.XZ)) {
-            return .tar_xz;
+            // Ambiguous: could be .xz or .tar.xz; defer to extension.
+            return .unknown;
         }
     }
 
@@ -243,7 +239,8 @@ test "detectFormatFromBytes: gzip magic" {
     };
 
     const format = detectFormatFromBytes(&gzip_header);
-    try std.testing.expectEqual(types.FormatType.tar_gz, format);
+    // Gzip magic is ambiguous - could be .gz or .tar.gz
+    try std.testing.expectEqual(types.FormatType.unknown, format);
 }
 
 test "detectFormatFromBytes: bzip2 magic" {
@@ -253,7 +250,8 @@ test "detectFormatFromBytes: bzip2 magic" {
     };
 
     const format = detectFormatFromBytes(&bzip2_header);
-    try std.testing.expectEqual(types.FormatType.tar_bz2, format);
+    // Bzip2 magic is ambiguous - could be .bz2 or .tar.bz2
+    try std.testing.expectEqual(types.FormatType.unknown, format);
 }
 
 test "detectFormatFromBytes: zip magic" {
@@ -283,7 +281,8 @@ test "detectFormatFromBytes: xz magic" {
     };
 
     const format = detectFormatFromBytes(&xz_header);
-    try std.testing.expectEqual(types.FormatType.tar_xz, format);
+    // XZ magic is ambiguous - could be .xz or .tar.xz
+    try std.testing.expectEqual(types.FormatType.unknown, format);
 }
 
 test "detectFormatFromBytes: tar ustar magic" {
