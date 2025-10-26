@@ -55,6 +55,8 @@ pub const CompressionError = error{
     DecompressionFailed,
     /// Compression failed
     CompressionFailed,
+    /// Checksum mismatch (data integrity check failed)
+    ChecksumMismatch,
 };
 
 /// Format layer errors
