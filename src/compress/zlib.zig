@@ -15,12 +15,10 @@
 
 const std = @import("std");
 const gzip = @import("gzip.zig");
+const c_zlib = @import("../c_compat/zlib.zig");
 
-/// Compression format
-pub const Format = enum(c_int) {
-    gzip = 0,
-    zlib = 1,
-};
+/// Re-export compression format from c_compat layer
+pub const Format = c_zlib.Format;
 
 /// Re-export gzip header types
 pub const GzipHeader = gzip.Header;
@@ -28,47 +26,10 @@ pub const GzipFooter = gzip.Footer;
 pub const GzipFlags = gzip.Flags;
 pub const GzipOs = gzip.Os;
 
-/// C compression result structure
-const CCompressResult = extern struct {
-    data: ?[*]u8,
-    size: usize,
-    error_code: c_int,
-};
-
-/// External C function for compression
-extern "c" fn zlib_compress(format: Format, src: [*]const u8, src_len: usize) CCompressResult;
-
 /// Compress data using zlib (via C implementation)
+/// This is a wrapper around the c_compat layer for backward compatibility
 pub fn compress(allocator: std.mem.Allocator, format: Format, data: []const u8) ![]u8 {
-    // Call C compression function
-    const result = zlib_compress(format, data.ptr, data.len);
-
-    // Check for errors
-    if (result.error_code != 0) {
-        // Free C-allocated memory if any
-        if (result.data) |ptr| {
-            std.c.free(ptr);
-        }
-        return error.CompressionFailed;
-    }
-
-    // Ensure we got data back
-    const c_data = result.data orelse return error.CompressionFailed;
-    if (result.size == 0) {
-        std.c.free(c_data);
-        return error.CompressionFailed;
-    }
-
-    // Copy C-allocated data to Zig-managed memory
-    const compressed = try allocator.alloc(u8, result.size);
-    errdefer allocator.free(compressed);
-
-    @memcpy(compressed, c_data[0..result.size]);
-
-    // Free C-allocated memory
-    std.c.free(c_data);
-
-    return compressed;
+    return c_zlib.compress(allocator, format, data);
 }
 
 /// Decompress data using Zig's standard library (Pure Zig implementation)

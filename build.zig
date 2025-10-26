@@ -19,7 +19,9 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Get zlib dependency
+    // zlib dependency (Phase 1-2 temporary C integration)
+    // See ADR-004-zlib-integration.md for rationale and migration plan
+    // Migration target: Phase 3 (Pure Zig implementation)
     const zlib_dep = b.dependency("zlib", .{
         .target = target,
         .optimize = optimize,
@@ -35,10 +37,11 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    // Link C dependencies (temporary, Phase 1-2 only)
     exe.linkLibC();
-    exe.linkLibrary(zlib_dep.artifact("z")); // Link zlib from dependency
+    exe.linkLibrary(zlib_dep.artifact("z")); // zlib for compression
     exe.addCSourceFile(.{
-        .file = b.path("src/c/zlib_compress.c"),
+        .file = b.path("src/c/zlib_compress.c"), // C wrapper for zlib
         .flags = &.{"-std=c99"},
     });
     exe.addIncludePath(b.path("src/c"));
