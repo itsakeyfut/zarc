@@ -155,9 +155,6 @@ test "crc32: binary data" {
 }
 
 test "Crc32: incremental calculation" {
-    const allocator = std.testing.allocator;
-    _ = allocator;
-
     const data = "Hello, World!";
 
     // Calculate in one go
