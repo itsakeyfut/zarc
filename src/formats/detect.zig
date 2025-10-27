@@ -156,14 +156,12 @@ pub fn detectFormatFromBytes(data: []const u8) types.FormatType {
 
     // Check gzip magic (most common for tar.gz)
     if (std.mem.eql(u8, data[0..2], &MagicNumbers.GZIP)) {
-        // Ambiguous: could be .gz or .tar.gz; defer to extension.
-        return .unknown;
+        return .gz;
     }
 
     // Check bzip2 magic
     if (std.mem.eql(u8, data[0..2], &MagicNumbers.BZIP2)) {
-        // Ambiguous: could be .bz2 or .tar.bz2; defer to extension.
-        return .unknown;
+        return .bz2;
     }
 
     // Check for ZIP format (needs 4 bytes)
@@ -183,8 +181,7 @@ pub fn detectFormatFromBytes(data: []const u8) types.FormatType {
 
         // Check for XZ format
         if (std.mem.eql(u8, data[0..6], &MagicNumbers.XZ)) {
-            // Ambiguous: could be .xz or .tar.xz; defer to extension.
-            return .unknown;
+            return .xz;
         }
     }
 
@@ -239,8 +236,8 @@ test "detectFormatFromBytes: gzip magic" {
     };
 
     const format = detectFormatFromBytes(&gzip_header);
-    // Gzip magic is ambiguous - could be .gz or .tar.gz
-    try std.testing.expectEqual(types.FormatType.unknown, format);
+    // Gzip magic returns .gz (tar.gz resolution is done by extension)
+    try std.testing.expectEqual(types.FormatType.gz, format);
 }
 
 test "detectFormatFromBytes: bzip2 magic" {
@@ -250,8 +247,8 @@ test "detectFormatFromBytes: bzip2 magic" {
     };
 
     const format = detectFormatFromBytes(&bzip2_header);
-    // Bzip2 magic is ambiguous - could be .bz2 or .tar.bz2
-    try std.testing.expectEqual(types.FormatType.unknown, format);
+    // Bzip2 magic returns .bz2 (tar.bz2 resolution is done by extension)
+    try std.testing.expectEqual(types.FormatType.bz2, format);
 }
 
 test "detectFormatFromBytes: zip magic" {
@@ -281,8 +278,8 @@ test "detectFormatFromBytes: xz magic" {
     };
 
     const format = detectFormatFromBytes(&xz_header);
-    // XZ magic is ambiguous - could be .xz or .tar.xz
-    try std.testing.expectEqual(types.FormatType.unknown, format);
+    // XZ magic returns .xz (tar.xz resolution is done by extension)
+    try std.testing.expectEqual(types.FormatType.xz, format);
 }
 
 test "detectFormatFromBytes: tar ustar magic" {
