@@ -86,12 +86,18 @@ pub fn detectFormat(allocator: std.mem.Allocator, path: []const u8) !types.Forma
         return detectFormatByExtension(path);
     };
 
-    // If magic detection returns unknown, try extension
-    if (magic_format == .unknown) {
-        return detectFormatByExtension(path);
-    }
+    const ext_format = detectFormatByExtension(path);
 
-    return magic_format;
+    // If magic detection returns unknown, use extension
+    if (magic_format == .unknown) return ext_format;
+
+    // Disambiguate generic compression vs tar.* using extension
+    switch (magic_format) {
+        .gz => return if (ext_format == .tar_gz) .tar_gz else .gz,
+        .bz2 => return if (ext_format == .tar_bz2) .tar_bz2 else .bz2,
+        .xz => return if (ext_format == .tar_xz) .tar_xz else .xz,
+        else => return magic_format,
+    }
 }
 
 /// Detect archive format from magic numbers
