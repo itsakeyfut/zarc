@@ -37,6 +37,9 @@ test {
     // Compatibility integration tests (Issue #13)
     _ = @import("compatibility_test.zig");
 
+    // Comprehensive tar.gz integration tests (Issue #56)
+    _ = @import("targz_test.zig");
+
     // Add more integration test modules here as they are created
     // Example:
     // _ = @import("compression_test.zig");
