@@ -79,11 +79,9 @@ pub const GzipDecompressResult = struct {
 
 /// Decompress gzip data and extract header/footer information
 pub fn decompressGzipWithInfo(allocator: std.mem.Allocator, compressed_data: []const u8) !GzipDecompressResult {
-    var stream = std.io.fixedBufferStream(compressed_data);
-    const reader = stream.reader();
-
     // Parse gzip header
-    var header = try GzipHeader.parse(allocator, reader);
+    var reader = std.Io.Reader.fixed(compressed_data);
+    var header = try GzipHeader.parse(allocator, &reader);
     errdefer header.deinit(allocator);
 
     // Decompress using the standard decompress function
@@ -95,8 +93,8 @@ pub fn decompressGzipWithInfo(allocator: std.mem.Allocator, compressed_data: []c
         return error.InvalidGzipFooter;
     }
 
-    var footer_stream = std.io.fixedBufferStream(compressed_data[compressed_data.len - 8 ..]);
-    const footer = try GzipFooter.parse(footer_stream.reader());
+    var footer_reader = std.Io.Reader.fixed(compressed_data[compressed_data.len - 8 ..]);
+    const footer = try GzipFooter.parse(&footer_reader);
 
     // Validate CRC-32
     const calculated_crc32 = crc32_mod.crc32(decompressed);
@@ -119,8 +117,8 @@ pub fn decompressGzipWithInfo(allocator: std.mem.Allocator, compressed_data: []c
 
 /// Read only the gzip header without decompressing
 pub fn readGzipHeader(allocator: std.mem.Allocator, compressed_data: []const u8) !GzipHeader {
-    var stream = std.io.fixedBufferStream(compressed_data);
-    return try GzipHeader.parse(allocator, stream.reader());
+    var reader = std.Io.Reader.fixed(compressed_data);
+    return try GzipHeader.parse(allocator, &reader);
 }
 
 test "compress and decompress gzip" {

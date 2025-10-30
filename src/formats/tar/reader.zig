@@ -18,6 +18,7 @@ const header = @import("header.zig");
 const types = @import("../../core/types.zig");
 const errors = @import("../../core/errors.zig");
 const archive = @import("../archive.zig");
+const streaming = @import("../../io/streaming.zig");
 
 /// TAR archive reader with streaming support
 ///
@@ -487,6 +488,129 @@ pub const TarReader = struct {
     }
 };
 
+/// TAR + Gzip reader for .tar.gz files
+///
+/// This struct manages the lifecycle of a tar.gz file extraction:
+/// 1. Decompresses the gzip file to a temporary file (streaming)
+/// 2. Reads the tar archive from the temporary file
+/// 3. Cleans up temporary files on deinit
+///
+/// Example:
+/// ```zig
+/// var reader = try TarGzipReader.initGzip(allocator, "archive.tar.gz");
+/// defer reader.deinit();
+///
+/// while (try reader.tar.next()) |entry| {
+///     std.debug.print("Entry: {s}\n", .{entry.path});
+/// }
+/// ```
+pub const TarGzipReader = struct {
+    allocator: std.mem.Allocator,
+    /// Temporary directory for decompressed tar file
+    temp_dir: std.testing.TmpDir,
+    /// Decompressed tar file
+    tar_file: std.fs.File,
+    /// TAR reader for the decompressed file
+    tar: TarReader,
+
+    /// Initialize a TAR reader for a gzipped TAR file
+    ///
+    /// This function:
+    /// 1. Opens the .tar.gz file
+    /// 2. Streams the gzip decompression to a temporary file
+    /// 3. Opens the temporary file for tar reading
+    ///
+    /// Parameters:
+    ///   - allocator: Memory allocator
+    ///   - gzip_path: Path to the .tar.gz file
+    ///
+    /// Returns:
+    ///   - Initialized TarGzipReader
+    ///
+    /// Errors:
+    ///   - error.FileNotFound: Input file not found
+    ///   - error.InvalidGzipMagic: Not a valid gzip file
+    ///   - error.OutOfMemory: Failed to allocate resources
+    ///
+    /// Example:
+    /// ```zig
+    /// var reader = try TarGzipReader.initGzip(allocator, "archive.tar.gz");
+    /// defer reader.deinit();
+    ///
+    /// while (try reader.tar.next()) |entry| {
+    ///     var buffer: [4096]u8 = undefined;
+    ///     while (true) {
+    ///         const n = try reader.tar.read(&buffer);
+    ///         if (n == 0) break;
+    ///         // Process decompressed data
+    ///     }
+    /// }
+    /// ```
+    pub fn initGzip(allocator: std.mem.Allocator, gzip_path: []const u8) !TarGzipReader {
+        // Open the gzipped file
+        const gzip_file = try std.fs.cwd().openFile(gzip_path, .{});
+        errdefer gzip_file.close();
+
+        // Create temporary directory for decompressed tar file
+        var temp_dir = std.testing.tmpDir(.{});
+        errdefer temp_dir.cleanup();
+
+        // Create temporary tar file
+        const tar_file = try temp_dir.dir.createFile("decompressed.tar", .{ .read = true });
+        errdefer tar_file.close();
+
+        // Stream decompress gzip to temporary file
+        {
+            var gzip_reader = try streaming.GzipReader.init(allocator, gzip_file);
+            defer gzip_reader.deinit();
+
+            var buffer: [types.BufferSize.default]u8 = undefined;
+            while (true) {
+                const n = try gzip_reader.read(&buffer);
+                if (n == 0) break;
+                try tar_file.writeAll(buffer[0..n]);
+            }
+        }
+
+        // Close the gzip file (no longer needed)
+        gzip_file.close();
+
+        // Seek to beginning of tar file for reading
+        try tar_file.seekTo(0);
+
+        // Initialize TAR reader
+        const tar = try TarReader.init(allocator, tar_file);
+
+        return TarGzipReader{
+            .allocator = allocator,
+            .temp_dir = temp_dir,
+            .tar_file = tar_file,
+            .tar = tar,
+        };
+    }
+
+    /// Clean up resources
+    ///
+    /// Closes the tar file, removes temporary directory
+    ///
+    /// Note: This automatically calls tar.deinit()
+    pub fn deinit(self: *TarGzipReader) void {
+        self.tar.deinit();
+        self.tar_file.close();
+        self.temp_dir.cleanup();
+    }
+
+    /// Create an ArchiveReader interface from this TarGzipReader
+    ///
+    /// Delegates to the underlying TarReader's archiveReader() method
+    ///
+    /// Returns:
+    ///   - ArchiveReader wrapping the underlying TarReader
+    pub fn archiveReader(self: *TarGzipReader) archive.ArchiveReader {
+        return self.tar.archiveReader();
+    }
+};
+
 /// Check if a block is all zeros
 fn isZeroBlock(block: *const [header.TarHeader.BLOCK_SIZE]u8) bool {
     for (block) |byte| {
@@ -627,4 +751,50 @@ test "TarReader: ArchiveReader polymorphism" {
     defer allocator.free(entries);
 
     try std.testing.expectEqual(@as(usize, 0), entries.len);
+}
+
+test "TarGzipReader: decompress and read tar.gz" {
+    const allocator = std.testing.allocator;
+
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    // Create a simple tar file (empty with just end markers)
+    const tar_file = try tmp_dir.dir.createFile("test.tar", .{ .read = true });
+    defer tar_file.close();
+
+    var zero_block: [512]u8 = undefined;
+    @memset(&zero_block, 0);
+    try tar_file.writeAll(&zero_block);
+    try tar_file.writeAll(&zero_block);
+    try tar_file.seekTo(0);
+
+    // Compress it with gzip
+    const gz_file = try tmp_dir.dir.createFile("test.tar.gz", .{ .read = true });
+    defer gz_file.close();
+
+    {
+        var gzip_writer = try streaming.GzipWriter.init(allocator, gz_file, .{});
+        defer gzip_writer.deinit();
+
+        var buffer: [4096]u8 = undefined;
+        while (true) {
+            const n = try tar_file.read(&buffer);
+            if (n == 0) break;
+            try gzip_writer.writeAll(buffer[0..n]);
+        }
+        try gzip_writer.finish();
+    }
+
+    // Get the absolute path for the tar.gz file
+    const gz_path = try tmp_dir.dir.realpathAlloc(allocator, "test.tar.gz");
+    defer allocator.free(gz_path);
+
+    // Now test reading the tar.gz file
+    var reader = try TarGzipReader.initGzip(allocator, gz_path);
+    defer reader.deinit();
+
+    // Should be able to read entries (empty archive)
+    const entry = try reader.tar.next();
+    try std.testing.expectEqual(@as(?types.Entry, null), entry);
 }

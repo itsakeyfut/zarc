@@ -97,32 +97,32 @@ pub const Header = struct {
 
     /// Parse gzip header from byte stream
     pub fn parse(allocator: std.mem.Allocator, reader: anytype) !Header {
-        // Read magic number
+        // Read magic number using std.Io.Reader API
         var magic: [2]u8 = undefined;
-        try reader.readNoEof(&magic);
+        try reader.readSliceAll(&magic);
         if (!std.mem.eql(u8, &magic, &magic_number)) {
             return error.InvalidGzipMagic;
         }
 
         // Read compression method
-        const cm = try reader.readByte();
+        const cm = try reader.takeByte();
         if (cm != compression_method_deflate) {
             return error.UnsupportedCompressionMethod;
         }
 
         // Read flags
-        const flg = try reader.readByte();
+        const flg = try reader.takeByte();
         const flags = Flags.fromByte(flg);
 
         // Read mtime (little-endian)
-        const mtime = try reader.readInt(u32, .little);
+        const mtime = try reader.takeInt(u32, .little);
 
         // Read extra flags
-        const xfl = try reader.readByte();
+        const xfl = try reader.takeByte();
         const extra_flags: ExtraFlags = @enumFromInt(xfl);
 
         // Read OS
-        const os_byte = try reader.readByte();
+        const os_byte = try reader.takeByte();
         const os: Os = @enumFromInt(os_byte);
 
         var header = Header{
@@ -137,10 +137,10 @@ pub const Header = struct {
 
         // Extra field
         if (flags.fextra) {
-            const xlen = try reader.readInt(u16, .little);
+            const xlen = try reader.takeInt(u16, .little);
             const extra = try allocator.alloc(u8, xlen);
             errdefer allocator.free(extra);
-            try reader.readNoEof(extra);
+            try reader.readSliceAll(extra);
             header.extra = extra;
         }
 
@@ -150,7 +150,7 @@ pub const Header = struct {
             defer name_bytes.deinit(allocator);
 
             while (true) {
-                const byte = try reader.readByte();
+                const byte = try reader.takeByte();
                 if (byte == 0) break;
                 try name_bytes.append(allocator, byte);
             }
@@ -164,7 +164,7 @@ pub const Header = struct {
             defer comment_bytes.deinit(allocator);
 
             while (true) {
-                const byte = try reader.readByte();
+                const byte = try reader.takeByte();
                 if (byte == 0) break;
                 try comment_bytes.append(allocator, byte);
             }
@@ -174,7 +174,7 @@ pub const Header = struct {
 
         // Header CRC16
         if (flags.fhcrc) {
-            header.header_crc16 = try reader.readInt(u16, .little);
+            header.header_crc16 = try reader.takeInt(u16, .little);
         }
 
         return header;
@@ -199,19 +199,24 @@ pub const Header = struct {
         try writer.writeAll(&magic_number);
 
         // Write compression method
-        try writer.writeByte(self.compression_method);
+        const cm_bytes = [_]u8{self.compression_method};
+        try writer.writeAll(&cm_bytes);
 
         // Write flags
-        try writer.writeByte(self.flags.toByte());
+        const flags_bytes = [_]u8{self.flags.toByte()};
+        try writer.writeAll(&flags_bytes);
 
         // Write mtime
-        try writer.writeInt(u32, self.mtime, .little);
+        const mtime_bytes = std.mem.toBytes(std.mem.nativeToLittle(u32, self.mtime));
+        try writer.writeAll(&mtime_bytes);
 
         // Write extra flags
-        try writer.writeByte(@intFromEnum(self.extra_flags));
+        const xfl_bytes = [_]u8{@intFromEnum(self.extra_flags)};
+        try writer.writeAll(&xfl_bytes);
 
         // Write OS
-        try writer.writeByte(@intFromEnum(self.os));
+        const os_bytes = [_]u8{@intFromEnum(self.os)};
+        try writer.writeAll(&os_bytes);
 
         // Write optional fields
 
@@ -220,7 +225,8 @@ pub const Header = struct {
                 if (extra.len > std.math.maxInt(u16)) {
                     return error.ExtraFieldTooLarge;
                 }
-                try writer.writeInt(u16, @intCast(extra.len), .little);
+                const xlen_bytes = std.mem.toBytes(std.mem.nativeToLittle(u16, @as(u16, @intCast(extra.len))));
+                try writer.writeAll(&xlen_bytes);
                 try writer.writeAll(extra);
             } else {
                 return error.MissingExtraField;
@@ -230,7 +236,8 @@ pub const Header = struct {
         if (self.flags.fname) {
             if (self.filename) |filename| {
                 try writer.writeAll(filename);
-                try writer.writeByte(0); // Null terminator
+                const null_byte = [_]u8{0};
+                try writer.writeAll(&null_byte);
             } else {
                 return error.MissingFilename;
             }
@@ -239,7 +246,8 @@ pub const Header = struct {
         if (self.flags.fcomment) {
             if (self.comment) |comment| {
                 try writer.writeAll(comment);
-                try writer.writeByte(0); // Null terminator
+                const null_byte = [_]u8{0};
+                try writer.writeAll(&null_byte);
             } else {
                 return error.MissingComment;
             }
@@ -247,7 +255,8 @@ pub const Header = struct {
 
         if (self.flags.fhcrc) {
             if (self.header_crc16) |crc| {
-                try writer.writeInt(u16, crc, .little);
+                const crc_bytes = std.mem.toBytes(std.mem.nativeToLittle(u16, crc));
+                try writer.writeAll(&crc_bytes);
             } else {
                 return error.MissingHeaderCrc;
             }
@@ -265,8 +274,8 @@ pub const Footer = struct {
 
     /// Parse footer from byte stream
     pub fn parse(reader: anytype) !Footer {
-        const crc32 = try reader.readInt(u32, .little);
-        const size = try reader.readInt(u32, .little);
+        const crc32 = try reader.takeInt(u32, .little);
+        const size = try reader.takeInt(u32, .little);
 
         return Footer{
             .crc32 = crc32,
@@ -276,8 +285,10 @@ pub const Footer = struct {
 
     /// Write footer to byte stream
     pub fn write(self: Footer, writer: anytype) !void {
-        try writer.writeInt(u32, self.crc32, .little);
-        try writer.writeInt(u32, self.isize, .little);
+        const crc32_bytes = std.mem.toBytes(std.mem.nativeToLittle(u32, self.crc32));
+        try writer.writeAll(&crc32_bytes);
+        const isize_bytes = std.mem.toBytes(std.mem.nativeToLittle(u32, self.isize));
+        try writer.writeAll(&isize_bytes);
     }
 
     /// Create footer from uncompressed data
@@ -309,8 +320,8 @@ test "parse basic gzip header" {
         0x03, // OS (Unix)
     };
 
-    var stream = std.io.fixedBufferStream(&header_bytes);
-    var header = try Header.parse(allocator, stream.reader());
+    var reader = std.Io.Reader.fixed(&header_bytes);
+    var header = try Header.parse(allocator, &reader);
     defer header.deinit(allocator);
 
     try std.testing.expectEqual(@as(u8, 8), header.compression_method);
@@ -334,8 +345,8 @@ test "parse gzip header with filename" {
         't', 'e', 's', 't', '.', 't', 'x', 't', 0x00, // Filename (null-terminated)
     };
 
-    var stream = std.io.fixedBufferStream(&header_bytes);
-    var header = try Header.parse(allocator, stream.reader());
+    var reader = std.Io.Reader.fixed(&header_bytes);
+    var header = try Header.parse(allocator, &reader);
     defer header.deinit(allocator);
 
     try std.testing.expectEqual(@as(u8, 8), header.compression_method);
@@ -357,12 +368,14 @@ test "write and read gzip header" {
 
     // Write header
     var buffer: [256]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
-    try original.write(stream.writer());
+    var fbs = std.io.fixedBufferStream(&buffer);
+    var writer = fbs.writer();
+    try original.write(&writer);
 
     // Read it back
-    stream.reset();
-    var parsed = try Header.parse(allocator, stream.reader());
+    const written = fbs.getWritten();
+    var reader = std.Io.Reader.fixed(written);
+    var parsed = try Header.parse(allocator, &reader);
     defer parsed.deinit(allocator);
 
     try std.testing.expectEqual(original.compression_method, parsed.compression_method);
@@ -382,8 +395,8 @@ test "invalid magic number" {
         0x00, 0x03,
     };
 
-    var stream = std.io.fixedBufferStream(&bad_header);
-    const result = Header.parse(allocator, stream.reader());
+    var reader = std.Io.Reader.fixed(&bad_header);
+    const result = Header.parse(allocator, &reader);
 
     try std.testing.expectError(error.InvalidGzipMagic, result);
 }
@@ -451,12 +464,14 @@ test "Footer: write and read with validation" {
 
     // Write to buffer
     var buffer: [8]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
-    try original_footer.write(stream.writer());
+    var fbs = std.io.fixedBufferStream(&buffer);
+    var writer = fbs.writer();
+    try original_footer.write(&writer);
 
     // Read it back
-    stream.reset();
-    const parsed_footer = try Footer.parse(stream.reader());
+    const written = fbs.getWritten();
+    var reader = std.Io.Reader.fixed(written);
+    const parsed_footer = try Footer.parse(&reader);
 
     // Verify values match
     try std.testing.expectEqual(original_footer.crc32, parsed_footer.crc32);
