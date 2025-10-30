@@ -59,8 +59,11 @@ pub const default_buffer_size = 64 * 1024;
 pub const GzipReader = struct {
     allocator: std.mem.Allocator,
     inner: std.fs.File,
+    file_read_buffer: []u8,
+    file_reader: std.fs.File.Reader,
+    decompress_buffer: []u8,
     header: gzip.Header,
-    decompressor: std.compress.flate.Decompress(std.fs.File.Reader),
+    decompressor: std.compress.flate.Decompress,
     crc32: crc32_mod.Crc32,
     uncompressed_size: u32,
     finished: bool,
@@ -79,17 +82,35 @@ pub const GzipReader = struct {
     ///   - error.InvalidGzipMagic: Not a valid gzip file
     ///   - error.UnsupportedCompressionMethod: Unsupported compression
     pub fn init(allocator: std.mem.Allocator, file: std.fs.File) !GzipReader {
+        // Allocate buffer for file reader (required by file.reader in Zig 0.15)
+        const file_read_buffer = try allocator.alloc(u8, 4096);
+        errdefer allocator.free(file_read_buffer);
+
+        // Create reader from file
+        const file_reader = file.reader(file_read_buffer);
+
         // Parse gzip header
-        const reader = file.reader();
-        var header = try gzip.Header.parse(allocator, reader);
+        var reader_interface = file_reader.interface;
+        var header = try gzip.Header.parse(allocator, &reader_interface);
         errdefer header.deinit(allocator);
 
-        // Create decompressor for raw deflate stream; header/footer handled manually
-        const decompressor = std.compress.flate.decompressor(reader, .deflate, &.{});
+        // Allocate buffer for decompressor (required by Decompress.init)
+        const decompress_buffer = try allocator.alloc(u8, std.compress.flate.max_window_len);
+        errdefer allocator.free(decompress_buffer);
+
+        // Create decompressor for gzip container
+        const decompressor = std.compress.flate.Decompress.init(
+            &reader_interface,
+            .gzip,
+            decompress_buffer,
+        );
 
         return GzipReader{
             .allocator = allocator,
             .inner = file,
+            .file_read_buffer = file_read_buffer,
+            .file_reader = file_reader,
+            .decompress_buffer = decompress_buffer,
             .header = header,
             .decompressor = decompressor,
             .crc32 = crc32_mod.Crc32.init(),
@@ -102,6 +123,8 @@ pub const GzipReader = struct {
     /// Clean up resources
     pub fn deinit(self: *GzipReader) void {
         self.header.deinit(self.allocator);
+        self.allocator.free(self.file_read_buffer);
+        self.allocator.free(self.decompress_buffer);
     }
 
     /// Read decompressed data
@@ -123,30 +146,23 @@ pub const GzipReader = struct {
             return 0;
         }
 
-        // Read and decompress data
-        const n = self.decompressor.reader.read(dest) catch |err| {
-            // Check if we reached end of compressed data
-            if (err == error.EndOfStream) {
-                self.finished = true;
-                if (!self.footer_validated) {
-                    try self.validateFooter();
-                }
-                return 0;
-            }
-            return err;
-        };
+        // Read and decompress data using readSliceShort
+        // This returns the number of bytes read, which is less than dest.len only at EOF
+        const n = try self.decompressor.reader.readSliceShort(dest);
 
-        if (n == 0) {
+        // If we read fewer bytes than requested, we've reached EOF
+        if (n < dest.len) {
             self.finished = true;
             if (!self.footer_validated) {
                 try self.validateFooter();
             }
-            return 0;
         }
 
         // Update CRC32 and size
-        self.crc32.update(dest[0..n]);
-        self.uncompressed_size +%= @truncate(n);
+        if (n > 0) {
+            self.crc32.update(dest[0..n]);
+            self.uncompressed_size +%= @truncate(n);
+        }
 
         return n;
     }
@@ -186,9 +202,9 @@ pub const GzipReader = struct {
     fn validateFooter(self: *GzipReader) !void {
         if (self.footer_validated) return;
 
-        // Read footer from current file position
-        const reader = self.inner.reader();
-        const footer = try gzip.Footer.parse(reader);
+        // Read footer from current file position using the file reader's interface
+        var reader_interface = self.file_reader.interface;
+        const footer = try gzip.Footer.parse(&reader_interface);
 
         // Validate CRC32
         const calculated_crc32 = self.crc32.final();
@@ -226,7 +242,10 @@ pub const GzipReader = struct {
 pub const GzipWriter = struct {
     allocator: std.mem.Allocator,
     inner: std.fs.File,
-    compressor: ?std.compress.flate.Compressor(std.fs.File.Writer),
+    file_write_buffer: []u8,
+    file_writer: std.fs.File.Writer,
+    buffer: []u8,
+    compressor: std.compress.flate.Compress,
     crc32: crc32_mod.Crc32,
     uncompressed_size: u32,
     finished: bool,
@@ -258,7 +277,12 @@ pub const GzipWriter = struct {
     ///   - error.OutOfMemory: Failed to allocate resources
     ///   - error.WriteError: Failed to write header
     pub fn init(allocator: std.mem.Allocator, file: std.fs.File, options: Options) !GzipWriter {
-        const writer = file.writer();
+        // Allocate buffer for file writer (required by file.writer in Zig 0.15)
+        const file_write_buffer = try allocator.alloc(u8, 4096);
+        errdefer allocator.free(file_write_buffer);
+
+        // Create writer from file
+        var file_writer = file.writer(file_write_buffer);
 
         // Build and write gzip header
         const header = gzip.Header{
@@ -283,21 +307,40 @@ pub const GzipWriter = struct {
             .comment = options.comment,
         };
 
-        try header.write(writer);
+        // Write header using the file writer's interface
+        // Need a mutable copy for writeAll which requires *Writer
+        var writer_interface = file_writer.interface;
+        try header.write(&writer_interface);
 
-        // Create compressor
-        const level_enum = switch (options.level) {
-            1 => std.compress.flate.Level.fast,
-            2...5 => std.compress.flate.Level.default,
-            6...9 => std.compress.flate.Level.best,
-            else => std.compress.flate.Level.default,
+        // Allocate buffer for compressor (required by Compress.init)
+        const buffer = try allocator.alloc(u8, 64 * 1024);
+        errdefer allocator.free(buffer);
+
+        // Determine compression level
+        const level: std.compress.flate.Compress.Level = switch (options.level) {
+            1 => .fast,
+            2...5 => .default,
+            6...9 => .best,
+            else => .default,
         };
 
-        const compressor = try std.compress.flate.compressor(writer, .{ .level = level_enum });
+        // Initialize compressor using Compress.init(output: *Writer, buffer: []u8, options: Options)
+        // Pass the file writer's interface directly
+        const compressor = std.compress.flate.Compress.init(
+            &file_writer.interface,
+            buffer,
+            .{
+                .level = level,
+                .container = .gzip,
+            },
+        );
 
         return GzipWriter{
             .allocator = allocator,
             .inner = file,
+            .file_write_buffer = file_write_buffer,
+            .file_writer = file_writer,
+            .buffer = buffer,
             .compressor = compressor,
             .crc32 = crc32_mod.Crc32.init(),
             .uncompressed_size = 0,
@@ -312,6 +355,9 @@ pub const GzipWriter = struct {
         if (!self.finished) {
             self.finish() catch {};
         }
+        // Free the buffers
+        self.allocator.free(self.buffer);
+        self.allocator.free(self.file_write_buffer);
     }
 
     /// Write uncompressed data
@@ -332,12 +378,8 @@ pub const GzipWriter = struct {
         self.crc32.update(data);
         self.uncompressed_size +%= @truncate(data.len);
 
-        // Compress and write
-        if (self.compressor) |*comp| {
-            try comp.writer.writeAll(data);
-        } else {
-            return error.CompressorNotInitialized;
-        }
+        // Compress and write using the compressor's writer field
+        try self.compressor.writer.writeAll(data);
 
         return data.len;
     }
@@ -361,20 +403,18 @@ pub const GzipWriter = struct {
     pub fn finish(self: *GzipWriter) !void {
         if (self.finished) return error.AlreadyFinished;
 
-        // Flush compressor
-        if (self.compressor) |*comp| {
-            try comp.finish();
-            self.compressor = null;
-        }
+        // End compression (flushes all data and writes final block)
+        try self.compressor.end();
 
-        // Write footer
+        // Write gzip footer
         const footer = gzip.Footer{
             .crc32 = self.crc32.final(),
             .isize = self.uncompressed_size,
         };
 
-        const writer = self.inner.writer();
-        try footer.write(writer);
+        // Write footer using the file writer's interface
+        var writer_interface = self.file_writer.interface;
+        try footer.write(&writer_interface);
 
         self.finished = true;
     }
@@ -419,14 +459,14 @@ test "GzipReader: stream decompression" {
     var reader = try GzipReader.init(allocator, compressed_file);
     defer reader.deinit();
 
-    var decompressed = std.ArrayList(u8).init(allocator);
-    defer decompressed.deinit();
+    var decompressed = std.array_list.Aligned(u8, null).empty;
+    defer decompressed.deinit(allocator);
 
     var buffer: [16]u8 = undefined;
     while (true) {
         const n = try reader.read(&buffer);
         if (n == 0) break;
-        try decompressed.appendSlice(buffer[0..n]);
+        try decompressed.appendSlice(allocator, buffer[0..n]);
     }
 
     try std.testing.expectEqualStrings(test_data, decompressed.items);
