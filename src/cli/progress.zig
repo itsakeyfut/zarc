@@ -192,7 +192,7 @@ pub const Spinner = struct {
 
 // Tests
 test "ProgressBar: init" {
-    const stdout_file = std.fs.File.stdout();
+    const stdout_file = std.io.getStdOut();
     const bar = ProgressBar.init(stdout_file, 100, false);
 
     try std.testing.expectEqual(@as(usize, 100), bar.total);
@@ -201,7 +201,7 @@ test "ProgressBar: init" {
 }
 
 test "ProgressBar: update" {
-    const stdout_file = std.fs.File.stdout();
+    const stdout_file = std.io.getStdOut();
     var bar = ProgressBar.init(stdout_file, 100, false);
 
     bar.current = 50;
@@ -209,7 +209,7 @@ test "ProgressBar: update" {
 }
 
 test "Spinner: init" {
-    const stdout_file = std.fs.File.stdout();
+    const stdout_file = std.io.getStdOut();
     const spinner = Spinner.init(stdout_file, false);
 
     try std.testing.expectEqual(@as(usize, 0), spinner.current_frame);

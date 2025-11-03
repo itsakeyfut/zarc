@@ -90,7 +90,7 @@ pub fn main() !void {
 
     // Parse arguments
     const parsed = cli.args.parseArgs(allocator, cli_args) catch |err| {
-        const stderr_file = std.fs.File.stderr();
+        const stderr_file = std.io.getStdErr();
         var err_out = cli.output.OutputWriter.init(stderr_file, .normal, .auto);
         err_out.printError("Failed to parse arguments: {s}", .{@errorName(err)}) catch {};
         stderr_file.writeAll("Use 'zarc help' for usage.\n") catch {};
@@ -104,7 +104,7 @@ pub fn main() !void {
     exit_code = executeCommand(allocator, parsed) catch |err| blk: {
         // Common CLI behavior: ignore SIGPIPE/BrokenPipe as success
         if (err == error.BrokenPipe) break :blk 0;
-        const stderr_file = std.fs.File.stderr();
+        const stderr_file = std.io.getStdErr();
         var err_out = cli.output.OutputWriter.init(stderr_file, .normal, .auto);
         err_out.printError("Unexpected error: {s}", .{@errorName(err)}) catch {};
         break :blk 1;
@@ -112,8 +112,8 @@ pub fn main() !void {
 }
 
 fn executeCommand(allocator: std.mem.Allocator, parsed: cli.args.ParsedArgs) !u8 {
-    const stdout_file = std.fs.File.stdout();
-    const stderr_file = std.fs.File.stderr();
+    const stdout_file = std.io.getStdOut();
+    const stderr_file = std.io.getStdErr();
 
     return switch (parsed) {
         .extract => |extract_args| {
