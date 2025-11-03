@@ -794,18 +794,35 @@ test "TarGzReader: read GNU tar.gz tiny files" {
     // Get ArchiveReader interface
     var archive_reader = reader.archiveReader();
 
-    // Read entries
+    // Read entries and verify content
     var entry_count: usize = 0;
+    var total_bytes_read: usize = 0;
+
     while (try archive_reader.next()) |entry| {
         entry_count += 1;
-        std.debug.print("Entry: {s} ({d} bytes)\n", .{ entry.path, entry.size });
+        std.debug.print("Entry: {s} ({d} bytes, type: {s})\n", .{ entry.path, entry.size, @tagName(entry.entry_type) });
 
-        // Skip reading content for now
-        // Just verify we can iterate through entries
+        // Read and verify content for regular files
+        if (entry.entry_type == .file) {
+            var buffer: [4096]u8 = undefined;
+            var file_bytes_read: usize = 0;
+
+            while (true) {
+                const n = try archive_reader.read(&buffer);
+                if (n == 0) break;
+                file_bytes_read += n;
+                total_bytes_read += n;
+            }
+
+            // Verify we read the expected amount
+            try std.testing.expectEqual(entry.size, @as(u64, file_bytes_read));
+            std.debug.print("  Read {d} bytes from file\n", .{file_bytes_read});
+        }
     }
 
     // Verify we found at least one entry
     try std.testing.expect(entry_count > 0);
+    std.debug.print("Total: {d} entries, {d} bytes read\n", .{ entry_count, total_bytes_read });
 }
 
 test "TarGzReader: read GNU tar.gz empty files" {
@@ -829,4 +846,119 @@ test "TarGzReader: read GNU tar.gz empty files" {
     }
 
     try std.testing.expect(entry_count > 0);
+}
+
+// =============================================================================
+// TarGzReader Error Handling Tests
+// =============================================================================
+
+test "TarGzReader: reject oversized archives (>512 MiB)" {
+    const allocator = std.testing.allocator;
+
+    // Create a temporary file that exceeds MAX_COMPRESSED_SIZE (512 MiB)
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const oversized_file = try tmp_dir.dir.createFile("oversized.gz", .{ .read = true });
+    defer oversized_file.close();
+
+    // Write just enough data to trigger the size limit
+    // We don't need to write 512 MiB, just enough to exceed the readToEndAlloc limit
+    // The test will fail when trying to read more than MAX_COMPRESSED_SIZE
+    const large_size: usize = 513 * 1024 * 1024; // 513 MiB
+
+    // Seek to create a sparse file of the required size
+    try oversized_file.seekTo(large_size - 1);
+    try oversized_file.writeAll(&[_]u8{0});
+    try oversized_file.seekTo(0);
+
+    // Should return error when trying to read oversized file
+    const result = TarGzReader.init(allocator, oversized_file);
+    try std.testing.expectError(error.FileTooBig, result);
+}
+
+test "TarGzReader: handle corrupt gzip header" {
+    const allocator = std.testing.allocator;
+
+    // Create a file with invalid gzip header
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const corrupt_file = try tmp_dir.dir.createFile("corrupt.gz", .{ .read = true });
+    defer corrupt_file.close();
+
+    // Write invalid gzip data (not a valid gzip header)
+    const invalid_data = [_]u8{ 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF };
+    try corrupt_file.writeAll(&invalid_data);
+    try corrupt_file.seekTo(0);
+
+    // Should return an error when trying to decompress invalid data
+    const result = TarGzReader.init(allocator, corrupt_file);
+    try std.testing.expectError(error.DecompressionFailed, result);
+}
+
+test "TarGzReader: handle truncated gzip archive" {
+    const allocator = std.testing.allocator;
+
+    // Create a file with truncated gzip data
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const truncated_file = try tmp_dir.dir.createFile("truncated.gz", .{ .read = true });
+    defer truncated_file.close();
+
+    // Write a valid gzip header but truncate the stream
+    // gzip magic number (0x1f, 0x8b) + compression method (0x08) + flags (0x00)
+    // This is incomplete and should fail decompression
+    const truncated_data = [_]u8{ 0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    try truncated_file.writeAll(&truncated_data);
+    try truncated_file.seekTo(0);
+
+    // Should return an error when trying to decompress truncated data
+    const result = TarGzReader.init(allocator, truncated_file);
+    try std.testing.expectError(error.DecompressionFailed, result);
+}
+
+test "TarGzReader: verify content end-to-end" {
+    const allocator = std.testing.allocator;
+
+    // Open a known tar.gz file
+    const file = try std.fs.cwd().openFile("tests/fixtures/gnu_tar/tiny_files.tar.gz", .{});
+    defer file.close();
+
+    // Create TarGzReader
+    var reader = try TarGzReader.init(allocator, file);
+    defer reader.deinit();
+
+    // Get ArchiveReader interface
+    var archive_reader = reader.archiveReader();
+
+    // Read entries and verify content
+    var entry_count: usize = 0;
+    var total_bytes_read: usize = 0;
+
+    while (try archive_reader.next()) |entry| {
+        entry_count += 1;
+        std.debug.print("Entry: {s} ({d} bytes)\n", .{ entry.path, entry.size });
+
+        // Read file content if it's a regular file
+        if (entry.entry_type == .file and entry.size > 0) {
+            var buffer: [4096]u8 = undefined;
+            var bytes_read: usize = 0;
+
+            while (true) {
+                const n = try archive_reader.read(&buffer);
+                if (n == 0) break;
+                bytes_read += n;
+                total_bytes_read += n;
+            }
+
+            // Verify we read the expected amount
+            try std.testing.expectEqual(entry.size, @as(u64, bytes_read));
+        }
+    }
+
+    // Verify we found at least one entry
+    try std.testing.expect(entry_count > 0);
+    std.debug.print("Successfully read {d} entries, {d} total bytes\n", .{ entry_count, total_bytes_read });
 }

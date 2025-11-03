@@ -19,7 +19,6 @@ const types = @import("../../core/types.zig");
 const errors = @import("../../core/errors.zig");
 const archive = @import("../archive.zig");
 const zlib = @import("../../compress/zlib.zig");
-const deflate = @import("../../compress/deflate/decode.zig");
 
 /// TAR archive reader with streaming support
 ///
@@ -707,18 +706,19 @@ pub const TarGzReader = struct {
         const decompressed = try zlib.decompress(allocator, .gzip, compressed);
         errdefer allocator.free(decompressed);
 
-        // Create fixed buffer stream for decompressed data
-        var fbs = std.io.fixedBufferStream(decompressed);
-
-        // Create tar reader from the stream
-        const tar_reader = try TarReader.initReader(allocator, fbs.reader().any());
-
-        return TarGzReader{
+        // Create the TarGzReader struct first to ensure the fixed_buffer_stream
+        // is stored in the heap-allocated struct before we create the AnyReader
+        var result = TarGzReader{
             .allocator = allocator,
             .decompressed_data = decompressed,
-            .fixed_buffer_stream = fbs,
-            .tar_reader = tar_reader,
+            .fixed_buffer_stream = std.io.fixedBufferStream(decompressed),
+            .tar_reader = undefined,
         };
+
+        // Now create tar reader using the struct's fixed_buffer_stream field
+        result.tar_reader = try TarReader.initReader(allocator, result.fixed_buffer_stream.reader().any());
+
+        return result;
     }
 
     /// Clean up resources

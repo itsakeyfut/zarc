@@ -120,6 +120,9 @@ CompressResult zlib_compress(CompressFormat format, const uint8_t *src, size_t s
 CompressResult zlib_decompress(CompressFormat format, const uint8_t *src, size_t src_len) {
     CompressResult result = {0};
 
+    // Maximum decompressed size: 512 MiB (adjust as needed)
+    const size_t MAX_DECOMPRESSED_SIZE = 512 * 1024 * 1024;
+
     // Validate input
     if (!src && src_len > 0) {
         result.error = -1; // Invalid: null pointer with non-zero length
@@ -164,7 +167,19 @@ CompressResult zlib_decompress(CompressFormat format, const uint8_t *src, size_t
         if (ret == Z_OK || ret == Z_BUF_ERROR) {
             // Grow output buffer and continue
             const size_t used = (size_t)stream.total_out;
+
+            // Check against maximum size
+            if (used >= MAX_DECOMPRESSED_SIZE) {
+                inflateEnd(&stream);
+                free(dest);
+                result.error = -4; // Custom: size limit exceeded
+                return result;
+            }
+
             size_t new_cap = cap * 2;
+            if (new_cap > MAX_DECOMPRESSED_SIZE) {
+                new_cap = MAX_DECOMPRESSED_SIZE;
+            }
             if (new_cap < used + 1) new_cap = used + 1;
             uint8_t *new_dest = (uint8_t *)realloc(dest, new_cap);
             if (!new_dest) {
