@@ -252,10 +252,10 @@ test "Entry: format output" {
         .mtime = 1234567890,
     };
 
-    var buffer = std.array_list.Aligned(u8, null).empty;
-    defer buffer.deinit(std.testing.allocator);
+    var buffer = std.ArrayList(u8).init(std.testing.allocator);
+    defer buffer.deinit();
 
-    try entry.format("", .{}, buffer.writer(std.testing.allocator));
+    try entry.format("", .{}, buffer.writer());
 
     const output = buffer.items;
     try std.testing.expect(std.mem.indexOf(u8, output, "FILE") != null);
@@ -274,10 +274,10 @@ test "Entry: symlink format" {
         .link_target = "/path/to/target.txt",
     };
 
-    var buffer = std.array_list.Aligned(u8, null).empty;
-    defer buffer.deinit(std.testing.allocator);
+    var buffer = std.ArrayList(u8).init(std.testing.allocator);
+    defer buffer.deinit();
 
-    try entry.format("", .{}, buffer.writer(std.testing.allocator));
+    try entry.format("", .{}, buffer.writer());
 
     const output = buffer.items;
     try std.testing.expect(std.mem.indexOf(u8, output, "LINK") != null);

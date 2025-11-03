@@ -52,6 +52,10 @@ const CCompressResult = extern struct {
 /// Implemented in src/c/zlib_compress.c
 extern "c" fn zlib_compress(format: Format, src: [*]const u8, src_len: usize) CCompressResult;
 
+/// External C function for decompression
+/// Implemented in src/c/zlib_compress.c
+extern "c" fn zlib_decompress(format: Format, src: [*]const u8, src_len: usize) CCompressResult;
+
 /// External C function to free zlib-allocated memory
 /// Implemented in src/c/zlib_compress.c
 extern "c" fn zlib_free(ptr: ?*anyopaque) void;
@@ -103,6 +107,62 @@ pub fn compress(allocator: std.mem.Allocator, format: Format, data: []const u8) 
     zlib_free(c_data);
 
     return compressed;
+}
+
+/// Decompress data using zlib (via C implementation)
+///
+/// This function wraps the zlib C library for decompression operations.
+/// The decompressed data is allocated using the Zig allocator and must be
+/// freed by the caller.
+///
+/// Parameters:
+///   - allocator: Memory allocator for the output buffer
+///   - format: Compression format (gzip or zlib)
+///   - data: Compressed data to decompress
+///
+/// Returns:
+///   - Decompressed data (caller owns the memory)
+///
+/// Errors:
+///   - error.ChecksumMismatch: CRC/Adler32 checksum validation failed
+///   - error.DecompressionFailed: zlib decompression failed
+///   - error.OutOfMemory: Memory allocation failed
+pub fn decompress(allocator: std.mem.Allocator, format: Format, data: []const u8) ![]u8 {
+    // Call C decompression function
+    const result = zlib_decompress(format, data.ptr, data.len);
+
+    // Check for errors
+    if (result.error_code != 0) {
+        // Free C-allocated memory if any
+        if (result.data) |ptr| {
+            zlib_free(ptr);
+        }
+        // Z_DATA_ERROR (-3) indicates corrupted data or checksum mismatch
+        if (result.error_code == -3) {
+            return error.ChecksumMismatch;
+        }
+        return error.DecompressionFailed;
+    }
+
+    // Ensure we got data back
+    const c_data = result.data orelse return error.DecompressionFailed;
+
+    // Allow empty decompressed data (valid for empty inputs)
+    if (result.size == 0) {
+        zlib_free(c_data);
+        return try allocator.alloc(u8, 0);
+    }
+
+    // Copy C-allocated data to Zig-managed memory
+    const decompressed = try allocator.alloc(u8, result.size);
+    errdefer allocator.free(decompressed);
+
+    @memcpy(decompressed, c_data[0..result.size]);
+
+    // Free C-allocated memory
+    zlib_free(c_data);
+
+    return decompressed;
 }
 
 test "compress gzip format" {

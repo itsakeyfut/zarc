@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 env:
-  ZIG_VERSION: 0.15.2
+  ZIG_VERSION: 0.14.0
 
 jobs:
   x86_64-linux:

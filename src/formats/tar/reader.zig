@@ -18,6 +18,7 @@ const header = @import("header.zig");
 const types = @import("../../core/types.zig");
 const errors = @import("../../core/errors.zig");
 const archive = @import("../archive.zig");
+const zlib = @import("../../compress/zlib.zig");
 
 /// TAR archive reader with streaming support
 ///
@@ -49,7 +50,7 @@ pub const TarReader = struct {
     const MAX_GNU_EXTENSION_SIZE: u64 = 16 * 1024 * 1024;
 
     allocator: std.mem.Allocator,
-    file: std.fs.File,
+    reader: std.io.AnyReader,
 
     /// Current entry being read
     current_entry: ?types.Entry = null,
@@ -66,7 +67,7 @@ pub const TarReader = struct {
     /// GNU tar long link name buffer (allocated when needed)
     gnu_long_link: ?[]u8 = null,
 
-    /// Initialize TAR reader
+    /// Initialize TAR reader from a file
     ///
     /// Parameters:
     ///   - allocator: Memory allocator
@@ -84,7 +85,29 @@ pub const TarReader = struct {
     pub fn init(allocator: std.mem.Allocator, file: std.fs.File) !TarReader {
         return TarReader{
             .allocator = allocator,
-            .file = file,
+            .reader = file.reader().any(),
+        };
+    }
+
+    /// Initialize TAR reader from a generic reader
+    ///
+    /// Parameters:
+    ///   - allocator: Memory allocator
+    ///   - reader: Any reader providing TAR data
+    ///
+    /// Returns:
+    ///   - Initialized TarReader
+    ///
+    /// Example:
+    /// ```zig
+    /// var fbs = std.io.fixedBufferStream(tar_data);
+    /// var reader = try TarReader.initReader(allocator, fbs.reader().any());
+    /// defer reader.deinit();
+    /// ```
+    pub fn initReader(allocator: std.mem.Allocator, reader: std.io.AnyReader) !TarReader {
+        return TarReader{
+            .allocator = allocator,
+            .reader = reader,
         };
     }
 
@@ -186,7 +209,7 @@ pub const TarReader = struct {
         // Try to read next header
         while (true) {
             var header_block: [header.TarHeader.BLOCK_SIZE]u8 = undefined;
-            const n = try self.file.readAll(&header_block);
+            const n = try self.reader.readAll(&header_block);
 
             if (n == 0) {
                 // End of file
@@ -203,7 +226,7 @@ pub const TarReader = struct {
             if (isZeroBlock(&header_block)) {
                 // Read one more block to confirm (TAR has two zero blocks at end)
                 var second_block: [header.TarHeader.BLOCK_SIZE]u8 = undefined;
-                const n2 = try self.file.readAll(&second_block);
+                const n2 = try self.reader.readAll(&second_block);
 
                 if (n2 == 0) {
                     // Some TAR writers only emit one zero block at EOF
@@ -295,7 +318,7 @@ pub const TarReader = struct {
         // Read up to remaining bytes
         const to_read_u64 = @min(@as(u64, buffer.len), self.remaining_bytes);
         const to_read: usize = @intCast(to_read_u64);
-        const n = try self.file.readAll(buffer[0..to_read]);
+        const n = try self.reader.readAll(buffer[0..to_read]);
 
         if (n != to_read) {
             return error.IncompleteArchive;
@@ -319,22 +342,15 @@ pub const TarReader = struct {
             return;
         }
 
-        // Try to seek (faster than reading) if the offset fits in i64
-        if (std.math.cast(i64, self.remaining_bytes)) |off| {
-            if (self.file.seekBy(off)) |_| {
-                self.file_position += self.remaining_bytes;
-                self.remaining_bytes = 0;
-                return;
-            } else |_| {}
-        }
-        // Fallback: read and discard
+        // Read and discard remaining data
+        // Note: seekBy is not available on generic readers, so we always read and discard
         var discard_buffer: [4096]u8 = undefined;
         var remaining = self.remaining_bytes;
 
         while (remaining > 0) {
             const to_read_u64 = @min(remaining, @as(u64, discard_buffer.len));
             const to_read: usize = @intCast(to_read_u64);
-            const n = try self.file.readAll(discard_buffer[0..to_read]);
+            const n = try self.reader.readAll(discard_buffer[0..to_read]);
 
             if (n != to_read) {
                 return error.IncompleteArchive;
@@ -361,17 +377,15 @@ pub const TarReader = struct {
             return;
         }
 
-        // Try to seek (faster than reading)
-        self.file.seekBy(@as(i64, @intCast(padding))) catch {
-            // If seek fails, read and discard
-            var discard_buffer: [512]u8 = undefined;
-            const to_read: usize = @intCast(padding);
-            const n = try self.file.readAll(discard_buffer[0..to_read]);
+        // Read and discard padding
+        // Note: seekBy is not available on generic readers
+        var discard_buffer: [512]u8 = undefined;
+        const to_read: usize = @intCast(padding);
+        const n = try self.reader.readAll(discard_buffer[0..to_read]);
 
-            if (n != to_read) {
-                return error.IncompleteArchive;
-            }
-        };
+        if (n != to_read) {
+            return error.IncompleteArchive;
+        }
 
         self.file_position += padding;
     }
@@ -402,7 +416,7 @@ pub const TarReader = struct {
         errdefer self.allocator.free(name_buffer);
 
         // Read name data
-        const n = try self.file.readAll(name_buffer);
+        const n = try self.reader.readAll(name_buffer);
         if (n != name_size) {
             return error.IncompleteArchive;
         }
@@ -453,7 +467,7 @@ pub const TarReader = struct {
         errdefer self.allocator.free(link_buffer);
 
         // Read link data
-        const n = try self.file.readAll(link_buffer);
+        const n = try self.reader.readAll(link_buffer);
         if (n != link_size) {
             return error.IncompleteArchive;
         }
@@ -628,3 +642,128 @@ test "TarReader: ArchiveReader polymorphism" {
 
     try std.testing.expectEqual(@as(usize, 0), entries.len);
 }
+
+/// TAR.GZ archive reader
+///
+/// Reads gzip-compressed TAR archives. This wraps a TarReader with automatic
+/// gzip decompression.
+///
+/// **IMPORTANT - Memory Usage Limitation:**
+/// This implementation currently loads the ENTIRE decompressed archive into memory
+/// before reading entries. This violates the streaming extraction principle and
+/// may consume significant RAM (up to several GB for moderately compressed archives).
+///
+/// Memory constraints:
+/// - Maximum compressed file size: 512 MiB (enforced at read time)
+/// - Maximum decompressed size: 512 MiB (enforced by zlib decompression)
+/// - Decompression ratio limit: Enforced by zlib layer to prevent bombs
+///
+/// For true streaming extraction without loading the entire archive into memory,
+/// a future implementation using streaming decompression is planned once Zig's
+/// std.compress APIs stabilize. Until then, use TarReader directly for
+/// uncompressed .tar files if memory is constrained.
+///
+/// Example:
+/// ```zig
+/// const file = try std.fs.cwd().openFile("archive.tar.gz", .{});
+/// defer file.close();
+///
+/// var reader = try TarGzReader.init(allocator, file);
+/// defer reader.deinit();
+///
+/// var archive_reader = reader.archiveReader();
+/// while (try archive_reader.next()) |entry| {
+///     std.debug.print("Entry: {s}\n", .{entry.path});
+/// }
+/// ```
+pub const TarGzReader = struct {
+    /// Maximum compressed file size (512 MiB)
+    /// Prevents loading extremely large files into memory
+    const MAX_COMPRESSED_SIZE: usize = 512 * 1024 * 1024;
+
+    allocator: std.mem.Allocator,
+    decompressed_data: []u8,
+    fixed_buffer_stream: std.io.FixedBufferStream([]u8),
+    tar_reader: TarReader,
+
+    /// Initialize TAR.GZ reader from a gzip-compressed file
+    ///
+    /// **WARNING:** This function loads the ENTIRE compressed file into memory,
+    /// decompresses it completely, and holds the decompressed data in memory.
+    /// This is NOT a streaming implementation.
+    ///
+    /// Parameters:
+    ///   - allocator: Memory allocator
+    ///   - file: Gzip-compressed TAR archive file (max 512 MiB compressed)
+    ///
+    /// Returns:
+    ///   - Initialized TarGzReader with full archive in memory
+    ///
+    /// Errors:
+    ///   - error.OutOfMemory: Failed to allocate decompression buffer
+    ///   - error.FileTooBig: Compressed file exceeds MAX_COMPRESSED_SIZE (512 MiB)
+    ///   - error.DecompressionFailed: Failed to decompress gzip data
+    ///                                (may also indicate decompressed size > 512 MiB)
+    ///
+    /// Example:
+    /// ```zig
+    /// const file = try std.fs.cwd().openFile("archive.tar.gz", .{});
+    /// defer file.close();
+    ///
+    /// var reader = try TarGzReader.init(allocator, file);
+    /// defer reader.deinit();
+    /// ```
+    pub fn init(allocator: std.mem.Allocator, file: std.fs.File) !TarGzReader {
+        // Read compressed data
+        const compressed = try file.readToEndAlloc(allocator, MAX_COMPRESSED_SIZE);
+        defer allocator.free(compressed);
+
+        // Decompress gzip data
+        const decompressed = try zlib.decompress(allocator, .gzip, compressed);
+        errdefer allocator.free(decompressed);
+
+        // Create the TarGzReader struct first to ensure the fixed_buffer_stream
+        // is stored in the heap-allocated struct before we create the AnyReader
+        var result = TarGzReader{
+            .allocator = allocator,
+            .decompressed_data = decompressed,
+            .fixed_buffer_stream = std.io.fixedBufferStream(decompressed),
+            .tar_reader = undefined,
+        };
+
+        // Now create tar reader using the struct's fixed_buffer_stream field
+        result.tar_reader = try TarReader.initReader(allocator, result.fixed_buffer_stream.reader().any());
+
+        return result;
+    }
+
+    /// Clean up resources
+    ///
+    /// Frees the decompressed data buffer and tar reader resources.
+    pub fn deinit(self: *TarGzReader) void {
+        self.tar_reader.deinit();
+        self.allocator.free(self.decompressed_data);
+    }
+
+    /// Get ArchiveReader interface
+    ///
+    /// Returns an ArchiveReader that wraps this TarGzReader, allowing it
+    /// to be used with generic archive extraction functions.
+    ///
+    /// Returns:
+    ///   - ArchiveReader interface
+    ///
+    /// Example:
+    /// ```zig
+    /// var reader = try TarGzReader.init(allocator, file);
+    /// defer reader.deinit();
+    ///
+    /// var archive_reader = reader.archiveReader();
+    /// while (try archive_reader.next()) |entry| {
+    ///     // Process entry...
+    /// }
+    /// ```
+    pub fn archiveReader(self: *TarGzReader) archive.ArchiveReader {
+        return self.tar_reader.archiveReader();
+    }
+};

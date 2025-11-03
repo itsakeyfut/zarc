@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  ZIG_VERSION: 0.15.2
+  ZIG_VERSION: 0.14.0
 
 jobs:
   coverage:
@@ -32,7 +32,7 @@ jobs:
           # Run unit tests
           zig build test --summary all
 
-          # Note: Zig doesn't have native coverage support yet (as of 0.15.2)
+          # Note: Zig doesn't have native coverage support yet (as of 0.14.0)
           # This workflow is a placeholder for future coverage tooling
           # Manual coverage tracking can be done through:
           # 1. Test file enumeration

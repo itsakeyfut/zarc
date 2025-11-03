@@ -218,7 +218,7 @@ pub fn formatDuration(allocator: std.mem.Allocator, nanoseconds: u64) ![]const u
 
 // Tests
 test "OutputWriter: init" {
-    const stdout_file = std.fs.File.stdout();
+    const stdout_file = std.io.getStdOut();
     const writer = OutputWriter.init(stdout_file, .normal, .never);
 
     try std.testing.expectEqual(OutputLevel.normal, writer.level);

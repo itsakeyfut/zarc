@@ -55,7 +55,7 @@ const errors = @import("../core/errors.zig");
 /// }
 ///
 /// // Retaining entries (requires deep cloning)
-/// var entries = std.array_list.Aligned(types.Entry, null).empty;
+/// var entries = std.ArrayList(types.Entry).init(allocator);
 /// defer {
 ///     for (entries.items) |entry| {
 ///         allocator.free(entry.path);
@@ -410,19 +410,19 @@ pub fn readAllEntries(
     allocator: std.mem.Allocator,
     archive: *ArchiveReader,
 ) ![]types.Entry {
-    var entries = std.array_list.Aligned(types.Entry, null).empty;
+    var entries = std.ArrayList(types.Entry).init(allocator);
     errdefer {
         for (entries.items) |e| freeEntry(allocator, e);
-        entries.deinit(allocator);
+        entries.deinit();
     }
 
     while (try archive.next()) |entry| {
         const owned = try cloneEntry(allocator, entry);
         errdefer freeEntry(allocator, owned);
-        try entries.append(allocator, owned);
+        try entries.append(owned);
     }
 
-    return entries.toOwnedSlice(allocator);
+    return entries.toOwnedSlice();
 }
 
 /// Validate that a path is relative and does not contain directory traversal

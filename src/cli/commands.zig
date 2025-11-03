@@ -28,8 +28,8 @@ pub fn runExtract(
     allocator: std.mem.Allocator,
     extract_args: args_mod.ExtractArgs,
 ) !u8 {
-    const stdout_file = std.fs.File.stdout();
-    const stderr_file = std.fs.File.stderr();
+    const stdout_file = std.io.getStdOut();
+    const stderr_file = std.io.getStdErr();
 
     var out = output.OutputWriter.init(
         stdout_file,

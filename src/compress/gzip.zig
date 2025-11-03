@@ -146,13 +146,13 @@ pub const Header = struct {
 
         // Original filename
         if (flags.fname) {
-            var name_bytes = std.array_list.Aligned(u8, null).empty;
-            defer name_bytes.deinit(allocator);
+            var name_bytes = std.ArrayList(u8).init(allocator);
+            defer name_bytes.deinit();
 
             while (true) {
                 const byte = try reader.readByte();
                 if (byte == 0) break;
-                try name_bytes.append(allocator, byte);
+                try name_bytes.append(byte);
             }
 
             header.filename = try allocator.dupe(u8, name_bytes.items);
@@ -160,13 +160,13 @@ pub const Header = struct {
 
         // Comment
         if (flags.fcomment) {
-            var comment_bytes = std.array_list.Aligned(u8, null).empty;
-            defer comment_bytes.deinit(allocator);
+            var comment_bytes = std.ArrayList(u8).init(allocator);
+            defer comment_bytes.deinit();
 
             while (true) {
                 const byte = try reader.readByte();
                 if (byte == 0) break;
-                try comment_bytes.append(allocator, byte);
+                try comment_bytes.append(byte);
             }
 
             header.comment = try allocator.dupe(u8, comment_bytes.items);

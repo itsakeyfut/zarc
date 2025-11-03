@@ -1,6 +1,6 @@
 .{
     .name = .zarc,
-    .version = "0.15.2",
+    .version = "0.14.0",
     .dependencies = .{
         .zlib = .{
             .url = "https://github.com/allyourcodebase/zlib/archive/refs/heads/main.tar.gz",
