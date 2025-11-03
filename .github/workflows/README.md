@@ -36,7 +36,7 @@ Main continuous integration workflow that runs on every push and PR.
 
 Test coverage tracking and reporting.
 
-**Note:** Zig doesn't have native coverage tooling yet (as of 0.15.2).
+**Note:** Zig doesn't have native coverage tooling yet (as of 0.14.0).
 This workflow provides a framework for future coverage integration and
 currently generates manual coverage reports.
 
@@ -120,7 +120,7 @@ zig build -Doptimize=ReleaseSafe
 
 ### Zig Version
 
-The project uses Zig `0.15.2` (specified in `.zigversion`).
+The project uses Zig `0.14.0` (specified in `.zigversion`).
 All workflows use this version automatically.
 
 ### Secrets

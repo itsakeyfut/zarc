@@ -1,7 +1,7 @@
 # zarc - Zig Archive Tool
 
 [![Status](https://img.shields.io/badge/status-active--development-brightgreen?style=flat-square)]()
-[![Zig Version](https://img.shields.io/badge/zig-0.15.2+-orange.svg)](https://ziglang.org/)
+[![Zig Version](https://img.shields.io/badge/zig-0.14.0+-orange.svg)](https://ziglang.org/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-red.svg)](https://opensource.org/licenses/Apache-2.0)
 
 A modern, cross-platform archive tool written in Zig. zarc provides a unified interface for working with archive files across different platforms with consistent behavior and strong security guarantees.
@@ -19,7 +19,7 @@ A modern, cross-platform archive tool written in Zig. zarc provides a unified in
 
 ### Prerequisites
 
-- Zig 0.15.2 or later
+- Zig 0.14.0
 
 ### Building from Source
 

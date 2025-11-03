@@ -799,7 +799,7 @@ test "TarGzReader: read GNU tar.gz tiny files" {
     while (try archive_reader.next()) |entry| {
         entry_count += 1;
         std.debug.print("Entry: {s} ({d} bytes)\n", .{ entry.path, entry.size });
-        
+
         // Skip reading content for now
         // Just verify we can iterate through entries
     }
