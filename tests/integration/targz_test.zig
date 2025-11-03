@@ -34,6 +34,7 @@
 const std = @import("std");
 const zarc = @import("zarc");
 const TarReader = zarc.formats.tar.reader.TarReader;
+const TarGzReader = zarc.formats.tar.reader.TarGzReader;
 const extract = zarc.app.extract;
 const security = zarc.app.security;
 const types = zarc.core.types;
@@ -773,4 +774,59 @@ test "tar.gz: extraction performance - tracks metrics" {
 
     const elapsed_ms = end_time - start_time;
     std.debug.print("Extraction took {}ms, extracted {} bytes\n", .{ elapsed_ms, result.total_bytes });
+}
+
+// =============================================================================
+// TarGzReader Tests
+// =============================================================================
+
+test "TarGzReader: read GNU tar.gz tiny files" {
+    const allocator = std.testing.allocator;
+
+    // Open tar.gz file
+    const file = try std.fs.cwd().openFile("tests/fixtures/gnu_tar/tiny_files.tar.gz", .{});
+    defer file.close();
+
+    // Create TarGzReader
+    var reader = try TarGzReader.init(allocator, file);
+    defer reader.deinit();
+
+    // Get ArchiveReader interface
+    var archive_reader = reader.archiveReader();
+
+    // Read entries
+    var entry_count: usize = 0;
+    while (try archive_reader.next()) |entry| {
+        entry_count += 1;
+        std.debug.print("Entry: {s} ({d} bytes)\n", .{ entry.path, entry.size });
+        
+        // Skip reading content for now
+        // Just verify we can iterate through entries
+    }
+
+    // Verify we found at least one entry
+    try std.testing.expect(entry_count > 0);
+}
+
+test "TarGzReader: read GNU tar.gz empty files" {
+    const allocator = std.testing.allocator;
+
+    const file = try std.fs.cwd().openFile("tests/fixtures/gnu_tar/empty_files.tar.gz", .{});
+    defer file.close();
+
+    var reader = try TarGzReader.init(allocator, file);
+    defer reader.deinit();
+
+    var archive_reader = reader.archiveReader();
+
+    var entry_count: usize = 0;
+    while (try archive_reader.next()) |entry| {
+        entry_count += 1;
+        // Empty files should have size 0
+        if (entry.entry_type == .file) {
+            try std.testing.expectEqual(@as(u64, 0), entry.size);
+        }
+    }
+
+    try std.testing.expect(entry_count > 0);
 }
