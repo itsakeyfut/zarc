@@ -46,6 +46,14 @@ typedef struct {
 // Caller is responsible for freeing result.data using free()
 CompressResult zlib_compress(CompressFormat format, const uint8_t *src, size_t src_len);
 
+// Decompress data using zlib
+// format: COMPRESS_FORMAT_GZIP or COMPRESS_FORMAT_ZLIB
+// src: compressed data to decompress
+// src_len: length of compressed data
+// Returns CompressResult with decompressed data or error
+// Caller is responsible for freeing result.data using free()
+CompressResult zlib_decompress(CompressFormat format, const uint8_t *src, size_t src_len);
+
 // Free a buffer allocated by this library (FFI-safe).
 void zlib_free(void *ptr);
 

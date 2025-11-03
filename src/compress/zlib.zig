@@ -33,33 +33,11 @@ pub fn compress(allocator: std.mem.Allocator, format: Format, data: []const u8) 
     return c_zlib.compress(allocator, format, data);
 }
 
-/// Decompress data using Zig's standard library (Pure Zig implementation)
+/// Decompress data using zlib (via C implementation)
+/// This is a wrapper around the c_compat layer for backward compatibility
+/// NOTE: Changed to use C implementation due to Zig 0.14.0 std.compress API issues
 pub fn decompress(allocator: std.mem.Allocator, format: Format, compressed_data: []const u8) ![]u8 {
-    const flate = std.compress.flate;
-
-    // Convert Format to flate.Container
-    const container: flate.Container = switch (format) {
-        .gzip => .gzip,
-        .zlib => .zlib,
-    };
-
-    // Create Reader using std.Io.Reader.fixed()
-    var in: std.Io.Reader = .fixed(compressed_data);
-
-    // Create output buffer
-    var out = std.array_list.Aligned(u8, null).empty;
-    defer out.deinit(allocator);
-
-    // Create output writer
-    var aw: std.Io.Writer.Allocating = .init(allocator);
-    defer aw.deinit();
-
-    // Decompress
-    var decompressor: flate.Decompress = .init(&in, container, &.{});
-    _ = try decompressor.reader.streamRemaining(&aw.writer);
-
-    // Return the decompressed data
-    return try allocator.dupe(u8, aw.written());
+    return c_zlib.decompress(allocator, format, compressed_data);
 }
 
 /// Result of gzip decompression with header information

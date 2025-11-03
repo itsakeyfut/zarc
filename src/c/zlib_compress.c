@@ -102,13 +102,108 @@ CompressResult zlib_compress(CompressFormat format, const uint8_t *src, size_t s
     deflateEnd(&stream);
 
     // Optionally shrink buffer to actual size
-    uint8_t *final_dest = (uint8_t *)realloc(dest, compressed_size);
-    if (final_dest) {
-        dest = final_dest;
+    // Don't realloc to size 0 to avoid free-like behavior
+    if (compressed_size > 0 && compressed_size < cap) {
+        uint8_t *final_dest = (uint8_t *)realloc(dest, compressed_size);
+        if (final_dest) {
+            dest = final_dest;
+        }
     }
 
     result.data = dest;
     result.size = compressed_size;
+    result.error = 0;
+
+    return result;
+}
+
+CompressResult zlib_decompress(CompressFormat format, const uint8_t *src, size_t src_len) {
+    CompressResult result = {0};
+
+    // Validate input
+    if (!src && src_len > 0) {
+        result.error = -1; // Invalid: null pointer with non-zero length
+        return result;
+    }
+
+    // For empty data, use a dummy pointer to avoid passing NULL to zlib
+    const uint8_t *actual_src = (src_len == 0) ? (const uint8_t *)"" : src;
+
+    // Start with a reasonable initial buffer size (4x the input size)
+    size_t initial_size = (src_len == 0) ? 1024 : (src_len * 4);
+    uint8_t *dest = (uint8_t *)malloc(initial_size);
+    if (!dest) {
+        result.error = -2; // Memory allocation failed
+        return result;
+    }
+
+    // Initialize zlib stream
+    z_stream stream;
+    memset(&stream, 0, sizeof(stream));
+    stream.next_in = (Bytef *)actual_src;
+    stream.avail_in = src_len;
+    stream.next_out = dest;
+    stream.avail_out = (uInt)((initial_size > 0xFFFFFFFFu) ? 0xFFFFFFFFu : (uInt)initial_size);
+
+    // Initialize inflate
+    // windowBits: 15 for zlib, 15+16 for gzip, 15+32 for auto-detect
+    int window_bits = (format == COMPRESS_FORMAT_GZIP) ? (15 + 16) : 15;
+    int ret = inflateInit2(&stream, window_bits);
+
+    if (ret != Z_OK) {
+        free(dest);
+        result.error = ret;
+        return result;
+    }
+
+    // Decompress with growth to handle large outputs
+    size_t cap = initial_size;
+    for (;;) {
+        ret = inflate(&stream, Z_NO_FLUSH);
+        if (ret == Z_STREAM_END) break;
+        if (ret == Z_OK || ret == Z_BUF_ERROR) {
+            // Grow output buffer and continue
+            const size_t used = (size_t)stream.total_out;
+            size_t new_cap = cap * 2;
+            if (new_cap < used + 1) new_cap = used + 1;
+            uint8_t *new_dest = (uint8_t *)realloc(dest, new_cap);
+            if (!new_dest) {
+                inflateEnd(&stream);
+                free(dest);
+                result.error = -2; // OOM
+                return result;
+            }
+            dest = new_dest;
+            cap = new_cap;
+            stream.next_out = (Bytef *)(dest + used);
+            size_t remaining = cap - used;
+            stream.avail_out = (uInt)((remaining > 0xFFFFFFFFu) ? 0xFFFFFFFFu : (uInt)remaining);
+            continue;
+        }
+        // Hard failure (data error, etc.)
+        inflateEnd(&stream);
+        free(dest);
+        result.error = ret;
+        return result;
+    }
+
+    // Get actual decompressed size
+    size_t decompressed_size = stream.total_out;
+
+    // Clean up
+    inflateEnd(&stream);
+
+    // Optionally shrink buffer to actual size
+    // Don't realloc to size 0 to avoid free-like behavior
+    if (decompressed_size > 0 && decompressed_size < cap) {
+        uint8_t *final_dest = (uint8_t *)realloc(dest, decompressed_size);
+        if (final_dest) {
+            dest = final_dest;
+        }
+    }
+
+    result.data = dest;
+    result.size = decompressed_size;
     result.error = 0;
 
     return result;
