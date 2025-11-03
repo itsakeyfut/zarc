@@ -648,9 +648,20 @@ test "TarReader: ArchiveReader polymorphism" {
 /// Reads gzip-compressed TAR archives. This wraps a TarReader with automatic
 /// gzip decompression.
 ///
-/// Note: This implementation decompresses the entire archive into memory before
-/// reading. For large archives, this may consume significant memory. A future
-/// streaming implementation is planned once Zig's std.compress APIs are stable.
+/// **IMPORTANT - Memory Usage Limitation:**
+/// This implementation currently loads the ENTIRE decompressed archive into memory
+/// before reading entries. This violates the streaming extraction principle and
+/// may consume significant RAM (up to several GB for moderately compressed archives).
+///
+/// Memory constraints:
+/// - Maximum compressed file size: 512 MiB (enforced at read time)
+/// - Maximum decompressed size: 512 MiB (enforced by zlib decompression)
+/// - Decompression ratio limit: Enforced by zlib layer to prevent bombs
+///
+/// For true streaming extraction without loading the entire archive into memory,
+/// a future implementation using streaming decompression is planned once Zig's
+/// std.compress APIs stabilize. Until then, use TarReader directly for
+/// uncompressed .tar files if memory is constrained.
 ///
 /// Example:
 /// ```zig
@@ -677,17 +688,22 @@ pub const TarGzReader = struct {
 
     /// Initialize TAR.GZ reader from a gzip-compressed file
     ///
+    /// **WARNING:** This function loads the ENTIRE compressed file into memory,
+    /// decompresses it completely, and holds the decompressed data in memory.
+    /// This is NOT a streaming implementation.
+    ///
     /// Parameters:
     ///   - allocator: Memory allocator
-    ///   - file: Gzip-compressed TAR archive file
+    ///   - file: Gzip-compressed TAR archive file (max 512 MiB compressed)
     ///
     /// Returns:
-    ///   - Initialized TarGzReader
+    ///   - Initialized TarGzReader with full archive in memory
     ///
     /// Errors:
     ///   - error.OutOfMemory: Failed to allocate decompression buffer
-    ///   - error.FileTooLarge: Compressed file exceeds MAX_COMPRESSED_SIZE
+    ///   - error.FileTooBig: Compressed file exceeds MAX_COMPRESSED_SIZE (512 MiB)
     ///   - error.DecompressionFailed: Failed to decompress gzip data
+    ///                                (may also indicate decompressed size > 512 MiB)
     ///
     /// Example:
     /// ```zig
