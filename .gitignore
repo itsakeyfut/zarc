@@ -4,3 +4,7 @@ zig-out/
 
 # secret plan at this time
 /plan
+
+# Claude local settings
+.claude/settings.local.json
+.claude/commands/
