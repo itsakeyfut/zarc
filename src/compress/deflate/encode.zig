@@ -245,6 +245,7 @@ pub const length_base: [29]u16 = .{
 /// Distance code lookup table
 /// Maps distances (1-32768) to distance codes (0-29)
 pub fn getDistanceCode(distance: u16) u5 {
+    std.debug.assert(distance > 0 and distance <= constants.max_distance);
     if (distance <= 256) {
         return distance_code_small[distance];
     }
@@ -455,7 +456,7 @@ pub const LZ77Compressor = struct {
             if (distance > max_distance) break;
 
             // Quick check: compare last character of best match first
-            if (best_length >= constants.min_match and
+            if (best_length >= constants.min_match and best_length < max_length and
                 data[match_pos + best_length] != data[pos + best_length])
             {
                 match_pos = self.hash_chain[match_pos & constants.window_mask];
@@ -1043,6 +1044,7 @@ pub const DeflateEncoder = struct {
                 while (i + count < lengths.len and lengths[i + count] == 0) {
                     count += 1;
                 }
+                const initial_count = count;
 
                 while (count > 0) {
                     if (count >= 11) {
@@ -1064,13 +1066,7 @@ pub const DeflateEncoder = struct {
                         count -= 1;
                     }
                 }
-                i += @intCast(i + 1 - i + count);
-                // Recalculate i position
-                var zero_count: usize = 1;
-                while (i + zero_count < lengths.len and lengths[i + zero_count] == 0) {
-                    zero_count += 1;
-                }
-                i += zero_count;
+                i += initial_count;
             } else {
                 // Emit the length value
                 try symbols.append(len);
