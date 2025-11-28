@@ -604,7 +604,22 @@ pub const HuffmanTreeBuilder = struct {
             if (f > 0) num_symbols += 1;
         }
 
-        if (num_symbols == 0) return codes;
+        if (num_symbols == 0) {
+            // For decoder compatibility (RFC 1951, zlib, libdeflate),
+            // ensure at least two symbols have non-zero code lengths
+            // even when no symbols are used. Many decoders reject
+            // all-zero code lengths as invalid.
+            if (n >= 2) {
+                codes[0].length = 1;
+                codes[0].code = 0;
+                codes[1].length = 1;
+                codes[1].code = 1;
+            } else if (n == 1) {
+                codes[0].length = 1;
+                codes[0].code = 0;
+            }
+            return codes;
+        }
 
         // Build code lengths using package-merge algorithm (simplified)
         const code_lengths = try self.computeCodeLengths(frequencies, max_code_length);
@@ -616,7 +631,8 @@ pub const HuffmanTreeBuilder = struct {
         return codes;
     }
 
-    /// Compute code lengths using a simplified algorithm
+    /// Compute code lengths using canonical Huffman construction
+    /// This algorithm ensures the Kraft inequality is always satisfied.
     fn computeCodeLengths(
         self: *HuffmanTreeBuilder,
         frequencies: []const u32,
@@ -631,10 +647,10 @@ pub const HuffmanTreeBuilder = struct {
         defer self.allocator.free(symbols);
         for (0..n) |i| symbols[i] = i;
 
-        // Sort by frequency (descending), then by symbol (ascending)
+        // Sort by frequency (ascending for Huffman tree construction)
         std.mem.sort(usize, symbols, frequencies, struct {
             fn lessThan(freqs: []const u32, a: usize, b: usize) bool {
-                if (freqs[a] != freqs[b]) return freqs[a] > freqs[b];
+                if (freqs[a] != freqs[b]) return freqs[a] < freqs[b];
                 return a < b;
             }
         }.lessThan);
@@ -648,40 +664,157 @@ pub const HuffmanTreeBuilder = struct {
         if (num_symbols == 0) return lengths;
         if (num_symbols == 1) {
             // Single symbol gets code length 1
-            lengths[symbols[0]] = 1;
+            lengths[symbols[n - 1]] = 1;
             return lengths;
         }
 
-        // Use a simple heuristic to assign code lengths
-        // This is a simplified version; real implementation would use
-        // package-merge or similar optimal algorithm
-        var total_codes: u32 = 0;
-        var current_length: u4 = 1;
-        var codes_at_length: u32 = 2;
-        var assigned: usize = 0;
+        // Find the start of non-zero frequency symbols
+        const start_idx = n - num_symbols;
 
-        for (symbols[0..num_symbols]) |s| {
-            while (total_codes + 1 > codes_at_length and current_length < max_length) {
-                total_codes *= 2;
-                codes_at_length *= 2;
-                current_length += 1;
+        // Allocate arrays for tree construction
+        // We need to track parent pointers to calculate depths
+        const tree_size = 2 * num_symbols - 1;
+        const parent = try self.allocator.alloc(usize, tree_size);
+        defer self.allocator.free(parent);
+        const depth = try self.allocator.alloc(u32, tree_size);
+        defer self.allocator.free(depth);
+        @memset(parent, 0);
+        @memset(depth, 0);
+
+        // Copy frequencies for the leaves (sorted ascending)
+        const node_freq = try self.allocator.alloc(u64, tree_size);
+        defer self.allocator.free(node_freq);
+        for (0..num_symbols) |i| {
+            node_freq[i] = frequencies[symbols[start_idx + i]];
+        }
+
+        // Build Huffman tree using two-queue algorithm
+        // Queue 1: leaf nodes (already sorted by frequency)
+        // Queue 2: internal nodes (added in order of increasing frequency)
+        var leaf_idx: usize = 0;
+        var internal_start: usize = num_symbols;
+        var next_internal: usize = num_symbols;
+
+        while (leaf_idx + (next_internal - num_symbols) < tree_size - 1) {
+            // Select two nodes with smallest frequencies
+            var node1: usize = undefined;
+            var node2: usize = undefined;
+
+            // Get first minimum
+            const leaf_avail1 = leaf_idx < num_symbols;
+            const internal_avail1 = internal_start < next_internal;
+
+            if (leaf_avail1 and (!internal_avail1 or node_freq[leaf_idx] <= node_freq[internal_start])) {
+                node1 = leaf_idx;
+                leaf_idx += 1;
+            } else {
+                node1 = internal_start;
+                internal_start += 1;
             }
 
-            lengths[s] = current_length;
-            total_codes += 1;
-            assigned += 1;
+            // Get second minimum
+            const leaf_avail2 = leaf_idx < num_symbols;
+            const internal_avail2 = internal_start < next_internal;
 
-            // Ensure we don't exceed max_length
-            if (current_length >= max_length) {
-                // Assign remaining symbols maximum length
-                for (symbols[assigned..num_symbols]) |remaining| {
-                    lengths[remaining] = @intCast(max_length);
-                }
-                break;
+            if (leaf_avail2 and (!internal_avail2 or node_freq[leaf_idx] <= node_freq[internal_start])) {
+                node2 = leaf_idx;
+                leaf_idx += 1;
+            } else {
+                node2 = internal_start;
+                internal_start += 1;
             }
+
+            // Create new internal node
+            node_freq[next_internal] = node_freq[node1] + node_freq[node2];
+            parent[node1] = next_internal;
+            parent[node2] = next_internal;
+            next_internal += 1;
+        }
+
+        // Calculate depths by walking up to root
+        const root = tree_size - 1;
+        depth[root] = 0;
+
+        // Process nodes from root down (internal nodes are at indices num_symbols..tree_size)
+        var i: usize = tree_size - 1;
+        while (i > 0) : (i -= 1) {
+            if (parent[i - 1] != 0 or i - 1 < num_symbols) {
+                depth[i - 1] = depth[parent[i - 1]] + 1;
+            }
+        }
+        // Handle the case where node 0's parent might actually be 0 (shouldn't happen in valid tree)
+        if (num_symbols > 0) {
+            depth[0] = depth[parent[0]] + 1;
+        }
+
+        // Extract code lengths from leaf depths, applying max_length limit
+        var needs_limiting = false;
+        for (0..num_symbols) |j| {
+            var len = depth[j];
+            if (len > max_length) {
+                len = max_length;
+                needs_limiting = true;
+            }
+            lengths[symbols[start_idx + j]] = @intCast(len);
+        }
+
+        // If any code exceeded max_length, use length-limiting algorithm
+        if (needs_limiting) {
+            try self.limitCodeLengths(lengths, symbols[start_idx..], max_length);
         }
 
         return lengths;
+    }
+
+    /// Limit code lengths to max_length while maintaining Kraft inequality
+    fn limitCodeLengths(
+        self: *HuffmanTreeBuilder,
+        lengths: []u4,
+        symbols: []const usize,
+        max_length: u32,
+    ) !void {
+        _ = self;
+
+        // Calculate the overflow from codes that exceeded max_length
+        // Using Kraft inequality: sum of 2^(max_length - len) must equal 2^max_length
+        const capacity: u32 = @as(u32, 1) << @intCast(max_length);
+        var used: u32 = 0;
+
+        for (symbols) |s| {
+            const len = lengths[s];
+            if (len > 0) {
+                used += @as(u32, 1) << @intCast(max_length - len);
+            }
+        }
+
+        // If oversubscribed, we need to increase some code lengths
+        while (used > capacity) {
+            // Find a code that can be lengthened (not already at max_length)
+            // Prefer lengthening shorter codes as they contribute more to overflow
+            var best_idx: ?usize = null;
+            var best_len: u4 = @intCast(max_length);
+
+            for (symbols, 0..) |s, idx| {
+                const len = lengths[s];
+                if (len > 0 and len < max_length and len < best_len) {
+                    best_len = len;
+                    best_idx = idx;
+                }
+            }
+
+            if (best_idx) |idx| {
+                const s = symbols[idx];
+                const old_len = lengths[s];
+                lengths[s] = old_len + 1;
+                // Recalculate: removing 2^(max-old) and adding 2^(max-new)
+                const old_contribution = @as(u32, 1) << @intCast(max_length - old_len);
+                const new_contribution = @as(u32, 1) << @intCast(max_length - old_len - 1);
+                used = used - old_contribution + new_contribution;
+            } else {
+                // All codes are at max_length, tree is valid
+                break;
+            }
+        }
     }
 
     /// Generate canonical Huffman codes from code lengths
