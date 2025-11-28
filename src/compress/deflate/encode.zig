@@ -596,6 +596,7 @@ pub const HuffmanTreeBuilder = struct {
     ) ![]HuffmanCode {
         const n = frequencies.len;
         const codes = try self.allocator.alloc(HuffmanCode, n);
+        errdefer self.allocator.free(codes);
         @memset(codes, HuffmanCode{});
 
         // Count non-zero frequencies
