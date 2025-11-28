@@ -399,6 +399,7 @@ pub const LZ77Compressor = struct {
 
     pub fn init(allocator: std.mem.Allocator, level: CompressionLevel) !Self {
         const hash_table = try allocator.alloc(u32, constants.hash_size);
+        errdefer allocator.free(hash_table);
         @memset(hash_table, nil_pos);
 
         const hash_chain = try allocator.alloc(u32, constants.window_size);
@@ -641,6 +642,7 @@ pub const HuffmanTreeBuilder = struct {
     ) ![]u4 {
         const n = frequencies.len;
         const lengths = try self.allocator.alloc(u4, n);
+        errdefer self.allocator.free(lengths);
         @memset(lengths, 0);
 
         // Create sorted list of symbols by frequency
