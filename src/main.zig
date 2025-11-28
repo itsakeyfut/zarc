@@ -45,6 +45,7 @@ pub const compress = struct {
     pub const gzip = @import("compress/gzip.zig");
     pub const deflate = struct {
         pub const decode = @import("compress/deflate/decode.zig");
+        pub const encode = @import("compress/deflate/encode.zig");
     };
 };
 
@@ -156,6 +157,7 @@ test {
     _ = compress.zlib;
     _ = compress.gzip;
     _ = compress.deflate.decode;
+    _ = compress.deflate.encode;
     _ = app.security;
     _ = app.extract;
     _ = platform.common;
