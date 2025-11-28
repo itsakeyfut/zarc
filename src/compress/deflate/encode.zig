@@ -875,7 +875,20 @@ pub const DeflateEncoder = struct {
     }
 
     /// Compress data using Deflate algorithm
+    ///
+    /// Note: Input size is limited to 4 GiB (u32 max) due to internal
+    /// position tracking. Larger inputs will return error.InputTooLarge.
     pub fn compress(self: *Self, data: []const u8) ![]u8 {
+        // Guard against inputs larger than u32 max (4 GiB)
+        // Internal position tracking uses u32 for efficiency
+        if (data.len > std.math.maxInt(u32)) {
+            return error.InputTooLarge;
+        }
+
+        // Reset LZ77 state to ensure clean dictionary for each compression
+        // This makes the encoder safely reusable across multiple calls
+        self.lz77.reset();
+
         var writer = BitWriter.init(self.allocator);
         defer writer.deinit();
 
@@ -1247,7 +1260,7 @@ pub const DeflateEncoder = struct {
 ///
 /// Parameters:
 ///   - allocator: Memory allocator for output buffer
-///   - data: Input data to compress
+///   - data: Input data to compress (max 4 GiB)
 ///   - level: Compression level (1-9, or 0 for no compression)
 ///
 /// Returns:
@@ -1255,6 +1268,7 @@ pub const DeflateEncoder = struct {
 ///
 /// Errors:
 ///   - error.OutOfMemory: Memory allocation failed
+///   - error.InputTooLarge: Input exceeds 4 GiB limit
 pub fn compress(
     allocator: std.mem.Allocator,
     data: []const u8,
