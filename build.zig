@@ -44,6 +44,10 @@ pub fn build(b: *std.Build) void {
         .file = b.path("src/c/zlib_compress.c"), // C wrapper for zlib
         .flags = &.{"-std=c99"},
     });
+    exe.addCSourceFile(.{
+        .file = b.path("src/c/huffman.c"), // C Huffman implementation
+        .flags = &.{"-std=c99"},
+    });
     exe.addIncludePath(b.path("src/c"));
     b.installArtifact(exe);
 
@@ -69,6 +73,10 @@ pub fn build(b: *std.Build) void {
     unit_tests.linkLibrary(zlib_dep.artifact("z"));
     unit_tests.addCSourceFile(.{
         .file = b.path("src/c/zlib_compress.c"),
+        .flags = &.{"-std=c99"},
+    });
+    unit_tests.addCSourceFile(.{
+        .file = b.path("src/c/huffman.c"),
         .flags = &.{"-std=c99"},
     });
     unit_tests.addIncludePath(b.path("src/c"));
@@ -101,6 +109,10 @@ pub fn build(b: *std.Build) void {
         .file = b.path("src/c/zlib_compress.c"),
         .flags = &.{"-std=c99"},
     });
+    unit_only_tests.addCSourceFile(.{
+        .file = b.path("src/c/huffman.c"),
+        .flags = &.{"-std=c99"},
+    });
     unit_only_tests.addIncludePath(b.path("src/c"));
 
     const run_unit_only_tests = b.addRunArtifact(unit_only_tests);
@@ -123,6 +135,10 @@ pub fn build(b: *std.Build) void {
     integration_tests.linkLibrary(zlib_dep.artifact("z"));
     integration_tests.addCSourceFile(.{
         .file = b.path("src/c/zlib_compress.c"),
+        .flags = &.{"-std=c99"},
+    });
+    integration_tests.addCSourceFile(.{
+        .file = b.path("src/c/huffman.c"),
         .flags = &.{"-std=c99"},
     });
     integration_tests.addIncludePath(b.path("src/c"));
@@ -220,6 +236,10 @@ fn addCrossCompileTargets(b: *std.Build, optimize: std.builtin.OptimizeMode) voi
         exe.linkLibrary(target_zlib_dep.artifact("z"));
         exe.addCSourceFile(.{
             .file = b.path("src/c/zlib_compress.c"),
+            .flags = &.{"-std=c99"},
+        });
+        exe.addCSourceFile(.{
+            .file = b.path("src/c/huffman.c"),
             .flags = &.{"-std=c99"},
         });
         exe.addIncludePath(b.path("src/c"));

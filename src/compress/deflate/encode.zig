@@ -31,6 +31,11 @@
 
 const std = @import("std");
 
+// C interop for Huffman coding (more reliable implementation)
+const c = @cImport({
+    @cInclude("huffman.h");
+});
+
 /// Deflate compression constants (RFC 1951)
 pub const constants = struct {
     /// Maximum sliding window size (32KB)
@@ -666,8 +671,13 @@ pub const HuffmanTreeBuilder = struct {
 
         if (num_symbols == 0) return lengths;
         if (num_symbols == 1) {
-            // Single symbol gets code length 1
-            lengths[symbols[n - 1]] = 1;
+            // Single symbol needs a dummy symbol for valid Huffman tree.
+            // RFC 1951 and standard decoders (zlib, libdeflate, gunzip) require
+            // at least two symbols with non-zero code lengths to form a valid tree.
+            const used_symbol = symbols[n - 1]; // The one symbol with frequency > 0
+            const dummy_symbol = symbols[0]; // Any zero-frequency symbol
+            lengths[used_symbol] = 1;
+            lengths[dummy_symbol] = 1;
             return lengths;
         }
 
@@ -1013,8 +1023,8 @@ pub const DeflateEncoder = struct {
         if (sum_lit > 0 and max_lit * 4 > sum_lit) return true;
         if (sum_dist > 0 and max_dist * 4 > sum_dist) return true;
 
-        // For small data, fixed is usually better (less overhead)
-        if (sum_lit < 100) return false;
+        // For larger data, dynamic can provide better compression
+        if (sum_lit >= 100) return true;
 
         return false;
     }
@@ -1059,6 +1069,7 @@ pub const DeflateEncoder = struct {
     }
 
     /// Write a block using dynamic Huffman codes
+    /// Uses C implementation for reliability (RFC 1951 compliance)
     fn writeDynamicBlock(
         self: *Self,
         writer: *BitWriter,
@@ -1066,86 +1077,71 @@ pub const DeflateEncoder = struct {
         lit_len_freq: *const [constants.num_lit_len_codes]u32,
         dist_freq: *const [constants.num_dist_codes]u32,
     ) !void {
-        // Build Huffman codes
-        const lit_len_codes = try self.tree_builder.buildCodes(lit_len_freq, constants.max_code_length);
-        defer self.allocator.free(lit_len_codes);
+        _ = self; // C implementation doesn't need Zig tree builder
+        // Build Huffman codes using C implementation
+        var lit_len_codes: [constants.num_lit_len_codes]c.HuffmanCode = undefined;
+        var dist_codes: [constants.num_dist_codes]c.HuffmanCode = undefined;
 
-        const dist_codes = try self.tree_builder.buildCodes(dist_freq, constants.max_code_length);
-        defer self.allocator.free(dist_codes);
+        const lit_result = c.huffman_build_codes(
+            @ptrCast(lit_len_freq),
+            constants.num_lit_len_codes,
+            constants.max_code_length,
+            &lit_len_codes,
+        );
 
-        // Determine HLIT and HDIST
-        var hlit: u32 = constants.num_lit_len_codes;
-        while (hlit > 257 and lit_len_codes[hlit - 1].length == 0) {
-            hlit -= 1;
+        const dist_result = c.huffman_build_codes(
+            @ptrCast(dist_freq),
+            constants.num_dist_codes,
+            constants.max_code_length,
+            &dist_codes,
+        );
+
+        if (lit_result != 0 or dist_result != 0) {
+            return error.HuffmanEncodingFailed;
         }
 
-        var hdist: u32 = constants.num_dist_codes;
-        while (hdist > 1 and dist_codes[hdist - 1].length == 0) {
-            hdist -= 1;
+        // Use C implementation to encode dynamic block header
+        // This is more reliable and RFC 1951 compliant
+        var header_buffer: [4096]u8 = undefined;
+        var header_bytes: usize = 0;
+        var header_bits: c_int = 0;
+
+        const header_result = c.huffman_encode_dynamic_header(
+            &lit_len_codes,
+            &dist_codes,
+            &header_buffer,
+            header_buffer.len,
+            &header_bytes,
+            &header_bits,
+        );
+
+        if (header_result != 0) {
+            return error.HuffmanHeaderEncodingFailed;
         }
 
-        // Encode code lengths
-        const code_length_order = [_]u8{ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
-
-        // Collect all code lengths
-        const total_codes = hlit + hdist;
-        const all_lengths = try self.allocator.alloc(u4, total_codes);
-        defer self.allocator.free(all_lengths);
-
-        for (0..hlit) |i| all_lengths[i] = lit_len_codes[i].length;
-        for (0..hdist) |i| all_lengths[hlit + i] = dist_codes[i].length;
-
-        // Run-length encode the lengths
-        const encoded = try self.runLengthEncode(all_lengths);
-        defer self.allocator.free(encoded.symbols);
-        defer self.allocator.free(encoded.extra);
-
-        // Build code length Huffman codes
-        var cl_freq: [19]u32 = .{0} ** 19;
-        for (encoded.symbols) |sym| cl_freq[sym] += 1;
-
-        const cl_codes = try self.tree_builder.buildCodes(&cl_freq, constants.max_cl_code_length);
-        defer self.allocator.free(cl_codes);
-
-        // Determine HCLEN
-        var hclen: u32 = 19;
-        while (hclen > 4 and cl_codes[code_length_order[hclen - 1]].length == 0) {
-            hclen -= 1;
+        // Write the header to our bit writer
+        // First, write complete bytes
+        for (header_buffer[0 .. header_bytes - 1]) |byte| {
+            try writer.writeBits(byte, 8);
         }
 
-        // Write header
-        try writer.writeBits(hlit - 257, 5); // HLIT
-        try writer.writeBits(hdist - 1, 5); // HDIST
-        try writer.writeBits(hclen - 4, 4); // HCLEN
-
-        // Write code length code lengths
-        for (0..hclen) |i| {
-            try writer.writeBits(cl_codes[code_length_order[i]].length, 3);
+        // Write remaining bits from last byte
+        if (header_bits > 0) {
+            const last_byte = header_buffer[header_bytes - 1];
+            try writer.writeBits(last_byte, @intCast(header_bits));
         }
 
-        // Write encoded lengths
-        for (encoded.symbols, 0..) |sym, i| {
-            try writer.writeCode(cl_codes[sym]);
-            // Write extra bits if needed
-            const extra = encoded.extra[i];
-            if (sym == 16) {
-                try writer.writeBits(extra, 2); // 3-6 repetitions
-            } else if (sym == 17) {
-                try writer.writeBits(extra, 3); // 3-10 zeros
-            } else if (sym == 18) {
-                try writer.writeBits(extra, 7); // 11-138 zeros
-            }
-        }
-
-        // Write compressed data
+        // Write compressed data using C-generated Huffman codes
         for (tokens) |token| {
             switch (token) {
                 .literal => |lit| {
-                    try writer.writeCode(lit_len_codes[lit]);
+                    const code = lit_len_codes[lit];
+                    try writer.writeBits(code.code, @intCast(code.length));
                 },
                 .match => |m| {
                     const len_code = length_code_table[m.length];
-                    try writer.writeCode(lit_len_codes[len_code]);
+                    const code = lit_len_codes[len_code];
+                    try writer.writeBits(code.code, @intCast(code.length));
 
                     const len_idx = len_code - 257;
                     const extra_bits = length_extra_bits[len_idx];
@@ -1155,7 +1151,8 @@ pub const DeflateEncoder = struct {
                     }
 
                     const dist_code = getDistanceCode(m.distance);
-                    try writer.writeCode(dist_codes[dist_code]);
+                    const dcode = dist_codes[dist_code];
+                    try writer.writeBits(dcode.code, @intCast(dcode.length));
 
                     const dist_extra = distance_extra_bits[dist_code];
                     if (dist_extra > 0) {
@@ -1167,7 +1164,8 @@ pub const DeflateEncoder = struct {
         }
 
         // End of block
-        try writer.writeCode(lit_len_codes[constants.end_of_block]);
+        const eob_code = lit_len_codes[constants.end_of_block];
+        try writer.writeBits(eob_code.code, @intCast(eob_code.length));
     }
 
     /// Run-length encoding result
