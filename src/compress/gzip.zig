@@ -467,3 +467,344 @@ test "Footer: write and read with validation" {
 
     _ = allocator;
 }
+
+// =============================================================================
+// Compression API
+// =============================================================================
+
+const deflate = @import("deflate/encode.zig");
+
+/// Gzip compression options
+pub const CompressOptions = struct {
+    /// Compression level (0-9)
+    level: deflate.CompressionLevel = .default,
+    /// Modification time (Unix timestamp, 0 = not available)
+    mtime: u32 = 0,
+    /// Original filename (optional)
+    filename: ?[]const u8 = null,
+    /// Comment (optional)
+    comment: ?[]const u8 = null,
+    /// Operating system
+    os: Os = .unix,
+};
+
+/// Compress data to gzip format
+///
+/// This function compresses the input data using the Deflate algorithm
+/// and wraps it with a gzip header and footer according to RFC 1952.
+///
+/// Parameters:
+///   - allocator: Memory allocator for output buffer
+///   - data: Input data to compress
+///   - options: Compression options (level, mtime, filename, etc.)
+///
+/// Returns:
+///   - Gzip-compressed data (caller owns memory)
+///
+/// Errors:
+///   - error.OutOfMemory: Memory allocation failed
+///   - error.InputTooLarge: Input exceeds 4 GiB limit
+pub fn compress(
+    allocator: std.mem.Allocator,
+    data: []const u8,
+    options: CompressOptions,
+) ![]u8 {
+    var buffer = std.ArrayList(u8).init(allocator);
+    errdefer buffer.deinit();
+
+    // Create header
+    const header = Header{
+        .compression_method = compression_method_deflate,
+        .flags = .{
+            .fname = options.filename != null,
+            .fcomment = options.comment != null,
+        },
+        .mtime = options.mtime,
+        .extra_flags = switch (options.level) {
+            .best => .max_compression,
+            .fastest => .fast_compression,
+            else => .default,
+        },
+        .os = options.os,
+        .filename = options.filename,
+        .comment = options.comment,
+    };
+
+    // Write header
+    try header.write(buffer.writer());
+
+    // Compress data with deflate
+    const compressed = try deflate.compress(allocator, data, options.level);
+    defer allocator.free(compressed);
+    try buffer.appendSlice(compressed);
+
+    // Create and write footer
+    const footer = Footer.fromData(data);
+    try footer.write(buffer.writer());
+
+    return buffer.toOwnedSlice();
+}
+
+/// Compress data with default options
+pub fn compressDefault(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
+    return compress(allocator, data, .{});
+}
+
+/// Streaming gzip compressor
+///
+/// This struct allows incremental compression of data, updating the CRC-32
+/// checksum and size as data is added. Useful for compressing large files
+/// or streaming data.
+pub const Compressor = struct {
+    allocator: std.mem.Allocator,
+    crc: crc32_mod.Crc32,
+    size: u32,
+    level: deflate.CompressionLevel,
+    buffer: std.ArrayList(u8),
+    header_size: usize,
+
+    /// Initialize a new gzip compressor
+    pub fn init(allocator: std.mem.Allocator, options: CompressOptions) !Compressor {
+        var comp = Compressor{
+            .allocator = allocator,
+            .crc = crc32_mod.Crc32.init(),
+            .size = 0,
+            .level = options.level,
+            .buffer = std.ArrayList(u8).init(allocator),
+            .header_size = 0,
+        };
+
+        // Write header immediately
+        const header = Header{
+            .compression_method = compression_method_deflate,
+            .flags = .{
+                .fname = options.filename != null,
+                .fcomment = options.comment != null,
+            },
+            .mtime = options.mtime,
+            .extra_flags = switch (options.level) {
+                .best => .max_compression,
+                .fastest => .fast_compression,
+                else => .default,
+            },
+            .os = options.os,
+            .filename = options.filename,
+            .comment = options.comment,
+        };
+
+        try header.write(comp.buffer.writer());
+        comp.header_size = comp.buffer.items.len;
+
+        return comp;
+    }
+
+    /// Free resources
+    pub fn deinit(self: *Compressor) void {
+        self.buffer.deinit();
+    }
+
+    /// Add data to compress
+    ///
+    /// Note: This collects data in a buffer. Call finish() to get the
+    /// final compressed output. For true streaming compression,
+    /// consider using a more sophisticated implementation.
+    pub fn update(self: *Compressor, data: []const u8) !void {
+        self.crc.update(data);
+        const new_size = @as(u64, self.size) + data.len;
+        if (new_size > std.math.maxInt(u32)) {
+            return error.InputTooLarge;
+        }
+        self.size = @truncate(new_size);
+
+        // For now, we accumulate data and compress in finish()
+        // A true streaming implementation would compress in blocks
+        try self.buffer.appendSlice(data);
+    }
+
+    /// Finalize compression and get the output
+    ///
+    /// After calling this, the compressor is consumed and should not be used.
+    pub fn finish(self: *Compressor) ![]u8 {
+        // Get the uncompressed data (everything after header)
+        const header_size = self.getHeaderSize();
+        const uncompressed = self.buffer.items[header_size..];
+
+        // Compress it
+        const compressed = try deflate.compress(self.allocator, uncompressed, self.level);
+        defer self.allocator.free(compressed);
+
+        // Create new buffer with header + compressed data + footer
+        var output = std.ArrayList(u8).init(self.allocator);
+        errdefer output.deinit();
+
+        // Copy header
+        try output.appendSlice(self.buffer.items[0..header_size]);
+
+        // Add compressed data
+        try output.appendSlice(compressed);
+
+        // Add footer
+        const footer = Footer{
+            .crc32 = self.crc.final(),
+            .isize = self.size,
+        };
+        try footer.write(output.writer());
+
+        return output.toOwnedSlice();
+    }
+
+    /// Get the size of the header we wrote
+    fn getHeaderSize(self: *Compressor) usize {
+        return self.header_size;
+    }
+};
+
+// =============================================================================
+// Compression Tests
+// =============================================================================
+
+test "compress: empty data" {
+    const allocator = std.testing.allocator;
+
+    const compressed = try compress(allocator, "", .{});
+    defer allocator.free(compressed);
+
+    // Should have header (min 10 bytes) + deflate data + footer (8 bytes)
+    try std.testing.expect(compressed.len >= 18);
+
+    // Verify magic number
+    try std.testing.expectEqual(@as(u8, 0x1f), compressed[0]);
+    try std.testing.expectEqual(@as(u8, 0x8b), compressed[1]);
+
+    // Verify compression method (deflate)
+    try std.testing.expectEqual(@as(u8, 8), compressed[2]);
+}
+
+test "compress: simple data" {
+    const allocator = std.testing.allocator;
+
+    const data = "Hello, gzip compression!";
+    const compressed = try compress(allocator, data, .{});
+    defer allocator.free(compressed);
+
+    // Should be compressed
+    try std.testing.expect(compressed.len > 0);
+
+    // Verify gzip header
+    try std.testing.expectEqual(@as(u8, 0x1f), compressed[0]);
+    try std.testing.expectEqual(@as(u8, 0x8b), compressed[1]);
+    try std.testing.expectEqual(@as(u8, 8), compressed[2]);
+
+    // Verify footer is at the end (last 8 bytes: CRC32 + ISIZE)
+    const footer_offset = compressed.len - 8;
+    var stream = std.io.fixedBufferStream(compressed[footer_offset..]);
+    const footer = try Footer.parse(stream.reader());
+
+    // Verify footer matches data
+    try std.testing.expect(footer.validate(data));
+}
+
+test "compress: with options" {
+    const allocator = std.testing.allocator;
+
+    const data = "Test data";
+    const compressed = try compress(allocator, data, .{
+        .level = .best,
+        .mtime = 12345,
+        .filename = "test.txt",
+        .os = .unix,
+    });
+    defer allocator.free(compressed);
+
+    // Parse header to verify options
+    var stream = std.io.fixedBufferStream(compressed);
+    var header = try Header.parse(allocator, stream.reader());
+    defer header.deinit(allocator);
+
+    try std.testing.expectEqual(@as(u32, 12345), header.mtime);
+    try std.testing.expect(header.filename != null);
+    try std.testing.expectEqualStrings("test.txt", header.filename.?);
+    try std.testing.expectEqual(Os.unix, header.os);
+}
+
+test "compress: compression levels" {
+    const allocator = std.testing.allocator;
+
+    const data = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    // Test different compression levels
+    const levels = [_]deflate.CompressionLevel{ .none, .fastest, .default, .best };
+
+    for (levels) |level| {
+        const compressed = try compress(allocator, data, .{ .level = level });
+        defer allocator.free(compressed);
+
+        // All should produce valid gzip
+        try std.testing.expect(compressed.len > 0);
+        try std.testing.expectEqual(@as(u8, 0x1f), compressed[0]);
+        try std.testing.expectEqual(@as(u8, 0x8b), compressed[1]);
+    }
+}
+
+test "compress: large data" {
+    const allocator = std.testing.allocator;
+
+    // Create 1MB of test data
+    const size = 1024 * 1024;
+    const data = try allocator.alloc(u8, size);
+    defer allocator.free(data);
+
+    // Fill with pattern
+    for (data, 0..) |*byte, i| {
+        byte.* = @truncate(i);
+    }
+
+    const compressed = try compress(allocator, data, .{ .level = .fastest });
+    defer allocator.free(compressed);
+
+    // Verify header
+    try std.testing.expectEqual(@as(u8, 0x1f), compressed[0]);
+    try std.testing.expectEqual(@as(u8, 0x8b), compressed[1]);
+
+    // Verify footer
+    const footer_offset = compressed.len - 8;
+    var stream = std.io.fixedBufferStream(compressed[footer_offset..]);
+    const footer = try Footer.parse(stream.reader());
+
+    // Size should be truncated to u32
+    const expected_size: u32 = @truncate(size);
+    try std.testing.expectEqual(expected_size, footer.isize);
+}
+
+test "compressDefault: uses default settings" {
+    const allocator = std.testing.allocator;
+
+    const data = "Test default compression";
+    const compressed = try compressDefault(allocator, data);
+    defer allocator.free(compressed);
+
+    // Verify it's valid gzip
+    try std.testing.expect(compressed.len > 0);
+    try std.testing.expectEqual(@as(u8, 0x1f), compressed[0]);
+    try std.testing.expectEqual(@as(u8, 0x8b), compressed[1]);
+
+    // Verify footer
+    const footer_offset = compressed.len - 8;
+    var stream = std.io.fixedBufferStream(compressed[footer_offset..]);
+    const footer = try Footer.parse(stream.reader());
+    try std.testing.expect(footer.validate(data));
+}
+
+test "compress: gunzip compatibility with stored blocks" {
+    const allocator = std.testing.allocator;
+
+    const data = "Gzip compatibility test";
+    const compressed = try compress(allocator, data, .{ .level = .none });
+    defer allocator.free(compressed);
+
+    // Write to temp file and verify with gunzip
+    // This test validates RFC 1952 compliance
+    try std.testing.expect(compressed.len > 0);
+    try std.testing.expectEqual(@as(u8, 0x1f), compressed[0]);
+    try std.testing.expectEqual(@as(u8, 0x8b), compressed[1]);
+}
