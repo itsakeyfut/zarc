@@ -161,6 +161,7 @@ int huffman_build_codes(
         return -1;
     }
 
+    // Calculate initial code lengths by traversing from leaves to root
     for (size_t i = 0; i < num_used; i++) {
         int depth = 0;
         int node = (int)i;
@@ -168,12 +169,76 @@ int huffman_build_codes(
             depth++;
             node = nodes[node].parent;
         }
-
+        // Cap at max_bits initially
         if (depth > max_bits) {
-            depth = max_bits; // Limit depth
+            depth = max_bits;
+        }
+        lengths[nodes[i].symbol] = (uint8_t)depth;
+    }
+
+    // Rebalance to satisfy Kraft inequality (RFC 1951 §3.2.2)
+    // Build histogram of code lengths
+    uint32_t counts[MAX_BITS + 1] = {0};
+    for (size_t i = 0; i < num_symbols; i++) {
+        if (lengths[i] > 0 && lengths[i] <= (uint8_t)max_bits) {
+            counts[lengths[i]]++;
+        }
+    }
+
+    // Calculate capacity: sum of 2^(max_bits - len) * count[len]
+    // Target capacity is 2^max_bits (Kraft: sum(2^-len) <= 1)
+    const uint32_t target = (uint32_t)1 << max_bits;
+    uint32_t used = 0;
+    for (int len = 1; len <= max_bits; len++) {
+        used += counts[len] << (max_bits - len);
+    }
+
+    // Rebalance if oversubscribed
+    while (used > target) {
+        // Find shortest length with available codes (< max_bits)
+        int shortest = -1;
+        for (int len = 1; len < max_bits; len++) {
+            if (counts[len] > 0) {
+                shortest = len;
+                break;
+            }
         }
 
-        lengths[nodes[i].symbol] = (uint8_t)depth;
+        if (shortest == -1) {
+            // All codes at max_bits - tree is already valid (or invalid input)
+            break;
+        }
+
+        // Move two codes from shortest to shortest+1 (package-merge style)
+        // This reduces capacity: 2*2^(max-L) -> 2^(max-(L+1)) = net reduction of 2^(max-L)
+        if (counts[shortest] >= 2) {
+            counts[shortest] -= 2;
+            counts[shortest + 1] += 1;
+            used -= (uint32_t)1 << (max_bits - shortest);
+        } else if (counts[shortest] == 1) {
+            // Only one code at this length; move it
+            counts[shortest] -= 1;
+            counts[shortest + 1] += 1;
+            used -= (uint32_t)1 << (max_bits - shortest - 1);
+        }
+    }
+
+    // Regenerate lengths[] from adjusted counts
+    // Assign shorter codes to more frequent symbols (higher indices in sorted nodes)
+    memset(lengths, 0, num_symbols);
+
+    // Assign codes in frequency order: iterate nodes from high to low frequency
+    // (nodes are sorted by frequency, so reverse iteration gives high freq first)
+    for (int i = (int)num_used - 1; i >= 0; i--) {
+        int sym = nodes[i].symbol;
+        // Find shortest available length for this symbol
+        for (int len = 1; len <= max_bits; len++) {
+            if (counts[len] > 0) {
+                lengths[sym] = (uint8_t)len;
+                counts[len]--;
+                break;
+            }
+        }
     }
 
     free(nodes);
