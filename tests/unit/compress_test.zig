@@ -81,7 +81,15 @@ test "gzip header: parse basic header" {
 
     // Verify header fields
     try std.testing.expectEqual(@as(u8, 8), header.compression_method);
-    try std.testing.expectEqual(gzip_mod.Os.unix, header.os); // C zlib uses Unix by default
+
+    // OS field is set by C zlib based on the platform
+    // On Windows MINGW64, zlib may set OS to TOPS-20 (10) instead of Unix (3)
+    // This is cosmetic and doesn't affect compression/decompression functionality
+    const expected_os = if (@import("builtin").os.tag == .windows)
+        gzip_mod.Os.tops_20  // MINGW64 zlib quirk
+    else
+        gzip_mod.Os.unix;
+    try std.testing.expectEqual(expected_os, header.os);
 }
 
 test "gzip header: write and parse" {
